@@ -33,6 +33,8 @@ FAKE_TLS_PORT=8443
 ENGINE_DIR="$HOME_DIR/.aio-patcher/engine"
 ENGINE_URL="https://github.com/Yondaime-kun/aio-mod-license-bypass/releases/download/engine-v3.5.2/aio-mod-engine"
 ENGINE_MD5="785231328c86e8e3e24f8a2c7f149814"
+LIBPY_URL="https://github.com/Yondaime-kun/aio-mod-license-bypass/releases/download/engine-v3.5.2/libpython3.14.so"
+LIBPY_MD5="778aec5978a4f2b47b2fc6f81ad2262f"
 LICENSE_HOST="aio.scwill.store"
 RUN_DIR="$HOME_DIR/.aio-patcher"          # pengganti /opt (tak perlu root)
 SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -236,6 +238,22 @@ patch_engine() {
     fi
   fi
   chmod 755 "$eng"
+  # Engine dynamic butuh libpython3.14.so VERSI KHUSUS (bukan libpython Termux
+  # biasa: isinya beda). Ambil dari release asset yg sama, taruh di samping
+  # engine, lalu runner mengarahkan LD_LIBRARY_PATH ke folder itu.
+  local lib="$ENGINE_DIR/libpython3.14.so"
+  if [ ! -s "$lib" ] || [ "$(md5sum "$lib" 2>/dev/null | cut -d' ' -f1)" != "$LIBPY_MD5" ]; then
+    if command -v curl >/dev/null 2>&1; then
+      curl -sL --retry 2 -o "$lib" "$LIBPY_URL" || true
+    elif command -v wget >/dev/null 2>&1; then
+      wget -q -O "$lib" "$LIBPY_URL" || true
+    fi
+    if [ "$(md5sum "$lib" 2>/dev/null | cut -d' ' -f1)" != "$LIBPY_MD5" ]; then
+      warn "  libpython3.14.so gagal diunduh (engine mungkin tetap 'cari lib' error)"
+      rm -f "$lib"
+    fi
+  fi
+  [ -s "$lib" ] && ok "  libpython3.14.so siap ($(stat -c%s "$lib" 2>/dev/null || echo ?) bytes)"
   # Launcher asli (13.8MB) tetap dipasang; engine 27MB disebar ke lokasi yg
   # dicari runner + $RELEASE_DIR supaya konsisten dgn yg dipindai Nuitka.
   install -m755 "$eng" "$RELEASE_DIR/aio-mod-engine" 2>/dev/null || true
@@ -369,9 +387,14 @@ fi
 cp -f "$SP/sitecustomize.py" "$RELEASE_DIR/sitecustomize.py" 2>/dev/null
 mkdir -p "$HOME_DIR/.local/lib/python3.14/site-packages" 2>/dev/null
 cp -f "$SP/sitecustomize.py" "$HOME_DIR/.local/lib/python3.14/site-packages/sitecustomize.py" 2>/dev/null
-# pastikan fake server hidup
-pgrep -f "$RUN_DIR/fakelicstls.py" >/dev/null 2>&1 || "$RUN_DIR/start-server.sh" >/dev/null 2>&1
-./aio-mod "\$@"
+# LD_LIBRARY_PATH: engine dynamic butuh libpython3.14.so VERSI KHUSUS (bukan
+# libpython Termux biasa). Engine + lib ditaruh di $ENGINE_DIR, dan linker
+# diarahkan ke sana. Tanpa ini: "library libpython3.14.so not found".
+export LD_LIBRARY_PATH="$ENGINE_DIR:$PREFIX/lib:/system/lib64${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+# Jalankan engine 27MB dari $ENGINE_DIR (bukan launcher 13.8MB di release/).
+ENGINE_BIN="$ENGINE_DIR/aio-mod-engine"
+[ -x "\$ENGINE_BIN" ] || ENGINE_BIN="$RELEASE_DIR/aio-mod"
+"\$ENGINE_BIN" "\$@"
 EOF
   chmod +x "$PREFIX/bin/aio"
   ok "  $PREFIX/bin/aio siap (jalankan: aio)"
