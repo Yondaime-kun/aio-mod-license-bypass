@@ -148,11 +148,18 @@ patch_dns() {
   else
     # Non-root: pakai shim getaddrinfo/socket di sitecustomize (lihat catatan)
     ok "  non-root: /etc/hosts dilewati (normal di Termux)"
-    if [ -f "$SP/sitecustomize.py" ] && grep -q "_dns_redirect" "$SP/sitecustomize.py" 2>/dev/null; then
-      ok "  DNS redirect aktif via sitecustomize (localhost shim)"
-    else
-      warn "  DNS redirect via sitecustomize belum terpasang"
-      warn "  (tidak wajib: fake verifier sudah bikin bypass jalan tanpa server)"
+    # cek di SEMUA lokasi yg dipindai engine (SP, release/, .local/)
+    local _dns_ok=0
+    for _f in "$SP/sitecustomize.py" "$RELEASE_DIR/sitecustomize.py" \
+              "$HOME_DIR/.local/lib/python3.14/site-packages/sitecustomize.py"; do
+      if [ -f "$_f" ] && grep -qE "_DNS_REDIRECT|_dns_redirect" "$_f" 2>/dev/null; then
+        ok "  DNS redirect aktif via sitecustomize: $_f"
+        _dns_ok=1
+      fi
+    done
+    if [ "$_dns_ok" = 0 ]; then
+      warn "  DNS redirect belum terpasang di sitecustomize manapun"
+      warn "  -> jalankan: cp '$FILES/sitecustomize.py' '$RELEASE_DIR/sitecustomize.py'"
     fi
   fi
 }
