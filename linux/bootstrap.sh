@@ -203,8 +203,10 @@ step_deps() {
   say "  4b. paket pure-python (pip wheel)"
   local wheeldir="$WORKDIR/wheels"
   mkdir -p "$wheeldir"
+  # CATATAN: frida punya binary native (wheel per-platform) -> engine install
+  # sendiri via pkg saat fitur Frida dipakai; jangan dipaksa di sini.
   local pure="certifi requests urllib3 idna charset-normalizer tqdm colorama packaging \
-    r2pipe 'protobuf<4' gpapi hermes_dec hbctool pycryptodome pynacl frida frida-tools"
+    r2pipe 'protobuf<4' gpapi hermes_dec hbctool pycryptodome pynacl"
   local have
   have=$(ls "$SPT" 2>/dev/null | tr 'A-Z' 'a-z')
   local missing=""
@@ -222,9 +224,13 @@ step_deps() {
     PYH=$(command -v python3 || true)
     if [ -n "$PYH" ]; then
       # coba wheel dulu (cepat); kalau tak ada wheel, jatuh ke sdist.
-      timeout 120 "$PYH" -m pip download --no-deps --only-binary=:all: --dest "$wheeldir" $missing >/dev/null 2>&1 \
-        || timeout 120 "$PYH" -m pip download --no-deps --dest "$wheeldir" $missing >/dev/null 2>&1 \
-        || warn "  pip download timeout/gagal — lanjut (deps opsional)"
+      # PER-PAKET: satu paket tanpa wheel (mis. frida) tak boleh menggagalkan semua.
+      local one
+      for one in $missing; do
+        timeout 120 "$PYH" -m pip download --no-deps --only-binary=:all: --dest "$wheeldir" "$one" >/dev/null 2>&1 \
+          || timeout 120 "$PYH" -m pip download --no-deps --dest "$wheeldir" "$one" >/dev/null 2>&1 \
+          || warn "  paket opsional dilewati: $one"
+      done
       # install: wheel -> unzip; sdist (.tar.gz) -> tar + setup.py tidak jalan
       # (pure-python saja), jadi ekstrak module top-level langsung.
       for whl in "$wheeldir"/*.whl; do
