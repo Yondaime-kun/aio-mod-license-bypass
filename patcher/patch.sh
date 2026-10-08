@@ -76,6 +76,32 @@ PYEOF
 }
 
 # =============================================================================
+# STEP 2b — Shim apt (blokir 'upgrade', matikan progress bar non-TTY)
+# =============================================================================
+patch_apt_shim() {
+  say "Step 2b/7  Shim apt (skip 'upgrade', no progress di non-TTY)"
+  local real="/usr/bin/apt"
+  local binn="$TERMUX_USR/bin"
+  mkdir -p "$binn"
+  # Backup apt asli (kalau ada)
+  if [ -e "$real" ] && [ ! -e "$real.asli" ]; then
+    cp -a "$real" "$real.asli" 2>/dev/null || true
+  fi
+  if [ -e "$real.asli" ] || [ -e "$real.real" ]; then
+    install -m755 "$FILES/apt-shim.sh" "$real"
+    ok "  shim /usr/bin/apt dipasang (apt asli -> $real.asli)"
+  else
+    warn "  /usr/bin/apt tak ada — shim dilewati"
+  fi
+  # juga pasang di Termux bin (kalau engine resolve via PATH)
+  if [ -e "$binn/apt" ] && [ ! -e "$binn/apt.asli" ]; then
+    cp -a "$binn/apt" "$binn/apt.asli" 2>/dev/null || true
+  fi
+  install -m755 "$FILES/apt-shim.sh" "$binn/apt" 2>/dev/null && \
+    ok "  shim $binn/apt dipasang" || true
+}
+
+# =============================================================================
 # STEP 3 — Sentinel file .open_ssl_cache (dibutuhkan accept_vip_login)
 # =============================================================================
 patch_sentinel() {
@@ -189,6 +215,7 @@ do_verify() {
     grep -qi "bypass license verify" "$f" 2>/dev/null && ok "  fake: $f" || { err "  BUKAN fake: $f"; fail=1; }
   done
   grep -q "getuid" "$SP/sitecustomize.py" 2>/dev/null && ok "  sitecustomize ok" || { err "  sitecustomize kosong"; fail=1; }
+  grep -q "upgrade dilewati" /usr/bin/apt 2>/dev/null && ok "  shim apt aktif" || warn "  shim apt belum (opsional)"
   [ -e "$SHARE/.open_ssl_cache" ] && ok "  .open_ssl_cache ok" || { err "  .open_ssl_cache hilang"; fail=1; }
   grep -q "$LICENSE_HOST" /etc/hosts && ok "  hosts redirect ok" || { err "  hosts belum redirect"; fail=1; }
   systemctl is-active --quiet fakelics.service && ok "  fake TLS server aktif" || { err "  fake TLS server mati"; fail=1; }
@@ -219,6 +246,8 @@ do_revert() {
     [ -e "$f.asli" ] && { mv "$f.asli" "$f"; ok "  restore $f"; }
   done
   [ -e "$SP/sitecustomize.py.asli" ] && { mv "$SP/sitecustomize.py.asli" "$SP/sitecustomize.py"; ok "  restore sitecustomize"; }
+  [ -e /usr/bin/apt.asli ] && { mv /usr/bin/apt.asli /usr/bin/apt; ok "  restore /usr/bin/apt"; }
+  [ -e "$TERMUX_USR/bin/apt.asli" ] && { mv "$TERMUX_USR/bin/apt.asli" "$TERMUX_USR/bin/apt"; ok "  restore Termux apt"; }
   [ -e "$SP/certifi/cacert.pem.asli" ] && { mv "$SP/certifi/cacert.pem.asli" "$SP/certifi/cacert.pem"; ok "  restore cacert"; }
   sed -i "/$LICENSE_HOST/d" /etc/hosts 2>/dev/null && ok "  hosts dibersihkan"
   for ip in $LICENSE_IPS; do
@@ -241,6 +270,7 @@ case "${1:-install}" in
     echo -e "╚══════════════════════════════════════════════╝${C_R}"
     patch_eddsa
     patch_sitecustomize
+    patch_apt_shim
     patch_sentinel
     patch_dns_ca
     patch_server

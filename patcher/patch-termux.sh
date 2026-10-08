@@ -93,6 +93,25 @@ PYEOF
 }
 
 # =============================================================================
+# STEP 2b — Shim apt (blokir 'upgrade' yang lambat, matikan progress bar non-TTY)
+# =============================================================================
+patch_apt_shim() {
+  say "Step 2b/6  Shim apt (skip 'upgrade')"
+  local binn="$PREFIX/bin"
+  local real="$binn/apt"
+  # Di Termux, apt ada di $PREFIX/bin/apt (file asli dari paket 'apt')
+  if [ -e "$real" ] && [ ! -e "$real.asli" ]; then
+    cp -a "$real" "$real.asli" 2>/dev/null || true
+  fi
+  # apt asli Termux itu binary; shim kita rujuk ke apt.real/apt.asli
+  if [ -e /usr/bin/apt ] && [ ! -e /usr/bin/apt.asli ]; then
+    cp -a /usr/bin/apt /usr/bin/apt.asli 2>/dev/null || true
+  fi
+  install -m755 "$FILES/apt-shim.sh" "$real" 2>/dev/null \
+    && ok "  shim $real dipasang" || warn "  gagal pasang shim apt"
+}
+
+# =============================================================================
 # STEP 3 — Sentinel .open_ssl_cache
 # =============================================================================
 patch_sentinel() {
@@ -213,6 +232,7 @@ do_revert() {
     [ -e "$f.asli" ] && { mv "$f.asli" "$f"; ok "  restore $base"; }
   done
   [ -e "$SP/sitecustomize.py.asli" ] && { mv "$SP/sitecustomize.py.asli" "$SP/sitecustomize.py"; ok "  restore sitecustomize"; }
+  [ -e "$PREFIX/bin/apt.asli" ] && { mv "$PREFIX/bin/apt.asli" "$PREFIX/bin/apt"; ok "  restore apt"; }
   pkill -f "$RUN_DIR/fakelicstls.py" 2>/dev/null || true
   rm -f "$PREFIX/bin/aio" "$RUN_DIR/fakelicstls.py"
   ok "  revert selesai"
@@ -225,6 +245,7 @@ case "${1:-install}" in
     echo -e "╚══════════════════════════════════════════════╝${C_R}"
     patch_eddsa
     patch_sitecustomize
+    patch_apt_shim
     patch_sentinel
     patch_dns
     patch_server

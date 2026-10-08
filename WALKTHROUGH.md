@@ -129,6 +129,7 @@ tidak ada calling-convention yang perlu dijaga.
 | 2 | sitecustomize | `$SP/sitecustomize.py` | spoof `os.getuid/euid = 2000` |
 | 3 | Sentinel | `$TERMUX_USR/share/.open_ssl_cache` | dibutuhkan `accept_vip_login` |
 | 4 | DNS redirect | `/etc/hosts` | `aio.scwill.store → 127.0.0.1` |
+| 4b | Shim `apt` | `/usr/bin/apt` (+ `$PREFIX/bin/apt`) | blokir `upgrade` yg lambat, matikan progress non-TTY |
 | 5 | CA palsu | certifi `cacert.pem` | lolos cert-pin |
 | 6 | Fake TLS server | `fakelics.service` (`:8443`) + `/opt/aio-patcher/` | balas JSON VIP |
 | 7 | Runner | `/usr/local/bin/aio` | wrapper qemu + env |
@@ -184,6 +185,16 @@ mengembalikannya.
 ---
 
 ## Troubleshooting
+
+**Loading bar "Configure [...] Upgrade paket Termux..." nyangkut / newline terus**
+- Engine menjalankan `apt upgrade` (path hardcoded `/usr/bin/apt`) → lambat &
+  tak perlu. Progress bar-nya pakai `\r`, jadi di non-TTY (dipipe ke log) malah
+  menumpuk newline.
+- **Fix**: patcher memasang **shim `apt`** (Step 2b) yang memblokir
+  `upgrade`/`dist-upgrade` dan mematikan progress saat non-TTY. `apt install`
+  tetap diteruskan (dibutuhkan engine).
+- Kalau tetap muncul: pastikan kamu menjalankan di **TTY nyata** (bukan
+  `| tee log`), atau `sudo ./patcher/patch.sh verify` cek "shim apt aktif".
 
 **Engine tak jalan / SIGKILL**
 - Harus dijalankan detached (systemd), bukan dari shell sandbox.

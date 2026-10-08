@@ -29,10 +29,12 @@ die()  { err "$*"; exit 1; }
 # STEP 1 — Paket Termux (network tools + python deps)
 # =============================================================================
 step_pkgs() {
-  say "Step 1/4  Install paket Termux"
+  say "Step 1/4  Install paket Termux (tanpa full upgrade)"
   command -v pkg >/dev/null 2>&1 || die "  'pkg' tak ada — ini bukan Termux?"
+  # JANGAN 'pkg upgrade' — lambat & berisiko. Cukup refresh index + install yg perlu.
+  # DEBIAN_FRONTEND noninteractive supaya apt gak nyangkut prompt "Y/n".
+  export DEBIAN_FRONTEND=noninteractive
   pkg update -y 2>&1 | tail -2 || true
-  # python + crypto deps + tools
   pkg install -y python python-pip python-pycryptodomex python-pynacl \
       python-cryptography openssl-tool curl 2>&1 | tail -3 || true
   ok "  paket terpasang"
