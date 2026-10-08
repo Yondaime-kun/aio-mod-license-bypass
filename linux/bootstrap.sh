@@ -221,12 +221,30 @@ step_deps() {
     local PYH
     PYH=$(command -v python3 || true)
     if [ -n "$PYH" ]; then
-      timeout 90 "$PYH" -m pip download --no-deps --only-binary=:all: --dest "$wheeldir" $missing >/dev/null 2>&1 \
-        || timeout 90 "$PYH" -m pip download --no-deps --dest "$wheeldir" $missing >/dev/null 2>&1 \
+      # coba wheel dulu (cepat); kalau tak ada wheel, jatuh ke sdist.
+      timeout 120 "$PYH" -m pip download --no-deps --only-binary=:all: --dest "$wheeldir" $missing >/dev/null 2>&1 \
+        || timeout 120 "$PYH" -m pip download --no-deps --dest "$wheeldir" $missing >/dev/null 2>&1 \
         || warn "  pip download timeout/gagal — lanjut (deps opsional)"
+      # install: wheel -> unzip; sdist (.tar.gz) -> tar + setup.py tidak jalan
+      # (pure-python saja), jadi ekstrak module top-level langsung.
       for whl in "$wheeldir"/*.whl; do
         [ -e "$whl" ] || continue
         unzip -oq "$whl" -d "$SPT" 2>/dev/null && ok "  install $(basename "$whl")" || true
+      done
+      for tgz in "$wheeldir"/*.tar.gz; do
+        [ -e "$tgz" ] || continue
+        local b; b="$(basename "$tgz" .tar.gz)"
+        rm -rf "$WORKDIR/sd_$b"; mkdir -p "$WORKDIR/sd_$b"
+        tar -xzf "$tgz" -C "$WORKDIR/sd_$b" 2>/dev/null || continue
+        # cari direktori package di dalam sdist
+        local pdir
+        pdir="$(find "$WORKDIR/sd_$b" -maxdepth 2 -type d -name "$b" 2>/dev/null | head -1)"
+        [ -z "$pdir" ] && pdir="$(find "$WORKDIR/sd_$b" -maxdepth 2 -type d -name "${b%%-*}" 2>/dev/null | head -1)"
+        if [ -n "$pdir" ]; then
+          cp -a "$pdir" "$SPT/" 2>/dev/null && ok "  install sdist $b" || true
+        else
+          warn "  sdist $b: package dir tak ditemukan"
+        fi
       done
     else
       warn "  python3 host tak ada — deps pure-python harus manual"
