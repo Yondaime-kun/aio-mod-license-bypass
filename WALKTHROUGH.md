@@ -186,15 +186,21 @@ mengembalikannya.
 
 ## Troubleshooting
 
-**Loading bar "Configure [...] Upgrade paket Termux..." nyangkut / newline terus**
+**Loading bar "Configure [...]" numpuk newline / wrap**
+- Bar progress engine lebar **92 karakter** (bar 31 + label padding 25) → butuh
+  layar **≥93 kolom**. Termux HP default ~80 kolom → **wrap**, dan `\r` (carriage
+  return) cuma bisa bersihin baris terakhir → tampak numpuk.
+- **Fix paling gampang**: perkecil font Termux (ctrl+alt+minus / pinch-out) atau
+  putar ke **landscape** sampai `tput cols` ≥93.
+- Ini **kosmetik** — VIP & menu tetap jalan normal.
+- Catatan: engine **selalu** pakai `\r` (tanpa cek `isatty`), jadi bar ini juga
+  "numpuk" kalau output di-pipe ke file/log (non-TTY). Jalankan di TTY asli.
+
+**`apt upgrade` lama / nyangkut saat Configure**
 - Engine menjalankan `apt upgrade` (path hardcoded `/usr/bin/apt`) → lambat &
-  tak perlu. Progress bar-nya pakai `\r`, jadi di non-TTY (dipipe ke log) malah
-  menumpuk newline.
-- **Fix**: patcher memasang **shim `apt`** (Step 2b) yang memblokir
-  `upgrade`/`dist-upgrade` dan mematikan progress saat non-TTY. `apt install`
-  tetap diteruskan (dibutuhkan engine).
-- Kalau tetap muncul: pastikan kamu menjalankan di **TTY nyata** (bukan
-  `| tee log`), atau `sudo ./patcher/patch.sh verify` cek "shim apt aktif".
+  tak perlu. Patcher memasang **shim `apt`** (Step 2b) yang memblokir
+  `upgrade`/`dist-upgrade`; `apt install` tetap diteruskan.
+- Cek: `sudo ./patcher/patch.sh verify` → "shim apt aktif".
 
 **Engine tak jalan / SIGKILL**
 - Harus dijalankan detached (systemd), bukan dari shell sandbox.
