@@ -28,6 +28,11 @@ SP="$PREFIX/lib/python3.14/site-packages"
 SHARE="$PREFIX/share"
 RELEASE_DIR="$HOME_DIR/release"
 FAKE_TLS_PORT=8443
+# Engine asli (decoded, dynamic) — launcher upstream (13.8MB) tidak dipakai
+# karena jalur unduh/decode-nya gagal di Termux non-root (lihat patch_engine).
+ENGINE_DIR="$HOME_DIR/.aio-patcher/engine"
+ENGINE_URL="https://github.com/Yondaime-kun/aio-mod-license-bypass/releases/download/engine-v3.5.2/aio-mod-engine"
+ENGINE_MD5="785231328c86e8e3e24f8a2c7f149814"
 LICENSE_HOST="aio.scwill.store"
 RUN_DIR="$HOME_DIR/.aio-patcher"          # pengganti /opt (tak perlu root)
 SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -59,7 +64,7 @@ esac
 # STEP 1 — Fake Ed25519 verifier (yang menyembuhkan license wall)
 # =============================================================================
 patch_eddsa() {
-  say "Step 1/6  Fake Ed25519 verifier (Crypto + Cryptodome)"
+  say "Step 1/7  Fake Ed25519 verifier (Crypto + Cryptodome)"
   [ -f "$FILES/eddsa_fake.py" ] || die "  eddsa_fake.py tak ada di $FILES"
 
   # PENTING: paket Termux 'python-pycryptodomex' HANYA menyediakan 'Cryptodome',
@@ -97,7 +102,7 @@ patch_eddsa() {
 #          tapi tetap pasang utk konsistensi)
 # =============================================================================
 patch_sitecustomize() {
-  say "Step 2/6  sitecustomize (spoof uid + bar shrinker)"
+  say "Step 2/7  sitecustomize (spoof uid + bar shrinker)"
   local tgt="$SP/sitecustomize.py"
   [ -e "$tgt" ] && [ ! -e "$tgt.asli" ] && cp -a "$tgt" "$tgt.asli"
   install -m644 "$FILES/sitecustomize.py" "$tgt"
@@ -109,7 +114,7 @@ patch_sitecustomize() {
 # STEP 2b — Shim apt (blokir 'upgrade' yang lambat, matikan progress bar non-TTY)
 # =============================================================================
 patch_apt_shim() {
-  say "Step 2b/6  Shim apt (skip 'upgrade')"
+  say "Step 2b/7  Shim apt (skip 'upgrade')"
   local binn="$PREFIX/bin"
   local real="$binn/apt"
   # Di Termux, apt ada di $PREFIX/bin/apt (file asli dari paket 'apt')
@@ -128,7 +133,7 @@ patch_apt_shim() {
 # STEP 3 — Sentinel .open_ssl_cache + CA palsu ke certifi
 # =============================================================================
 patch_sentinel() {
-  say "Step 3/6  Sentinel .open_ssl_cache"
+  say "Step 3/7  Sentinel .open_ssl_cache"
   mkdir -p "$SHARE"
   [ -e "$SHARE/.open_ssl_cache" ] || touch "$SHARE/.open_ssl_cache"
   chmod 666 "$SHARE/.open_ssl_cache" 2>/dev/null || true
@@ -138,7 +143,7 @@ patch_sentinel() {
 # Engine memvalidasi TLS server dgn CA store (certifi / OpenSSL default).
 # Tanpa CA kita di store, handshake ditolak: TLSV1_ALERT_UNKNOWN_CA -> Gratis.
 patch_ca() {
-  say "Step 3b/6  CA palsu -> trust store (certifi / etc tls)"
+  say "Step 3b/7  CA palsu -> trust store (certifi / etc tls)"
   local added=0
   # WAJIB: root CA (we1ca.pem). Engine memvalidasi chain TLS thd root CA ini;
   # tanpa root CA di trust store -> TLSV1_ALERT_UNKNOWN_CA -> mode Gratis.
@@ -173,7 +178,7 @@ patch_ca() {
 # STEP 4 — Redirect DNS (Termux non-root: TIDAK bisa tulis /etc/hosts)
 # =============================================================================
 patch_dns() {
-  say "Step 4/6  Redirect DNS $LICENSE_HOST"
+  say "Step 4/7  Redirect DNS $LICENSE_HOST"
   # Termux non-root TIDAK bisa menulis /etc/hosts (system file Android).
   # Solusinya: pasang shim DNS lokal lewat resolv/route engine sendiri.
   if [ -w /etc/hosts ] 2>/dev/null; then
@@ -201,10 +206,54 @@ patch_dns() {
 }
 
 # =============================================================================
+# STEP 4b — Engine sebenarnya (27MB, decoded)
+# =============================================================================
+# 'aio-mod' yg di-download dari upstream (13.8MB) adalah INSTALLER/launcher:
+# ia mengunduh & men-decode engine asli ke $HOME/release lalu menjalankannya.
+# Di Termux non-root langkah download-nya sering gagal (HTTPError utk banyak
+# dependency) sehingga yg jalan adalah launcher sendiri -> license gate beda ->
+# mode Gratis. Jadi kita pasang engine ASLI (dynamic, 27MB) langsung, dan
+# runner menjalankan itu.
+patch_engine() {
+  say "Step 4b/7  Engine asli (decoded, 27MB)"
+  mkdir -p "$ENGINE_DIR"
+  local eng="$ENGINE_DIR/aio-mod-engine"
+  if [ -s "$eng" ] && [ "$(md5sum "$eng" 2>/dev/null | cut -d' ' -f1)" = "$ENGINE_MD5" ]; then
+    ok "  engine sudah ada & md5 cocok"
+  else
+    ok "  engine belum ada — mengunduh dari upstream release..."
+    if command -v curl >/dev/null 2>&1; then
+      curl -sL --retry 2 -o "$eng" "$ENGINE_URL" || true
+    elif command -v wget >/dev/null 2>&1; then
+      wget -q -O "$eng" "$ENGINE_URL" || true
+    fi
+    local got=$(md5sum "$eng" 2>/dev/null | cut -d' ' -f1)
+    if [ "$got" != "$ENGINE_MD5" ]; then
+      rm -f "$eng"
+      die "  gagal unduh engine (md5=$got, harus $ENGINE_MD5)
+      unduh manual: $ENGINE_URL
+      taruh di: $eng"
+    fi
+  fi
+  chmod 755 "$eng"
+  # Launcher asli (13.8MB) tetap dipasang; engine 27MB disebar ke lokasi yg
+  # dicari runner + $RELEASE_DIR supaya konsisten dgn yg dipindai Nuitka.
+  install -m755 "$eng" "$RELEASE_DIR/aio-mod-engine" 2>/dev/null || true
+  install -m755 "$eng" "$RELEASE_DIR/aio-mod" 2>/dev/null || true
+  ok "  engine terpasang: $eng ($(stat -c%s "$eng" 2>/dev/null || echo '?') bytes)"
+  # python shared lib utk engine dynamic (dari paket Termux)
+  if ! ls "$RELEASE_DIR"/libpython3.14.so >/dev/null 2>&1; then
+    for so in "$PREFIX/lib/libpython3.14.so"; do
+      [ -e "$so" ] && { install -m644 "$so" "$RELEASE_DIR/libpython3.14.so" 2>/dev/null || true; ok "  libpython3.14.so disalin"; }
+    done
+  fi
+}
+
+# =============================================================================
 # STEP 5 — Fake TLS server (nohup, BUKAN systemd)
 # =============================================================================
 patch_server() {
-  say "Step 5/6  Fake TLS license server (:$FAKE_TLS_PORT, nohup)"
+  say "Step 5/7  Fake TLS license server (:$FAKE_TLS_PORT, nohup)"
   mkdir -p "$RUN_DIR"
   install -m644 "$FAKESRV" "$RUN_DIR/fakelicstls.py"
   install -m644 "$CERTS/lc2.pem"   "$RUN_DIR/lc2.pem"
@@ -277,7 +326,7 @@ EOF
 # STEP 6 — Runner $PREFIX/bin/aio (native, TANPA qemu)
 # =============================================================================
 patch_runner() {
-  say "Step 6/6  Runner $PREFIX/bin/aio  (native aarch64)"
+  say "Step 6/7  Runner $PREFIX/bin/aio  (native aarch64)"
   cat > "$PREFIX/bin/aio" <<EOF
 #!/data/data/com.termux/files/usr/bin/bash
 # Jalankan engine langsung (native — Termux sudah aarch64).
@@ -363,6 +412,7 @@ case "${1:-install}" in
     patch_apt_shim
     patch_sentinel
     patch_ca
+    patch_engine
     patch_dns
     patch_server
     patch_runner
