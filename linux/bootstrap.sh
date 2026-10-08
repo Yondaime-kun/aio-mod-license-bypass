@@ -177,7 +177,7 @@ step_deps() {
   # resource zip). Tanpa ini, VIP tetap jalan tapi menu modding APK gagal.
   say "  4a2. dependency toolkit (java/zip/7z/aapt/apktool/clang/ndk)"
   for p in openjdk-21 openjdk-17 zip 7zip aapt android-tools clang lld llvm \
-           libcompiler-rt make cmake libc++ ndk-multilib \
+           libllvm libcompiler-rt make cmake libc++ ndk-multilib \
            ndk-multilib-native-static ndk-multilib-native-stubs ndk-sysroot \
            aapt2 apksigner apktool d8 dx ecj \
            libandroid-shmem libiconv libandroid-execinfo libandroid-spawn \
@@ -321,18 +321,27 @@ step_emu_shims() {
   local bindir="$TERMUX_USR/bin"
   [ -d "$bindir" ] || { warn "  $bindir tak ada — skip"; return 0; }
   local qemu; qemu="$(command -v qemu-aarch64-static || echo /usr/bin/qemu-aarch64-static)"
-  # lib aarch64 (libjvm butuh libandroid-shmem/libiconv/...) harus terlihat
-  # oleh linker bionic -> taruh di /system/lib64 (LD_LIBRARY_PATH shim).
+  # lib aarch64 (libjvm/libLLVM butuh libandroid-shmem/libiconv/libc++/...) harus
+  # terlihat oleh linker bionic -> taruh di /system/lib64 (LD_LIBRARY_PATH shim).
   local libdir="$TERMUX_USR/lib"
   if [ -d "$libdir" ]; then
     local n=0
-    for l in "$libdir"/*.so "$libdir"/*.so.*; do
+    # semua .so di usr/lib + satu level subdir (mis. usr/lib/clang/*/lib/linux)
+    while IFS= read -r l; do
       [ -e "$l" ] || continue
       local lb; lb="$(basename "$l")"
-      [ -e "$SYS64/$lb" ] || { cp -a "$l" "$SYS64/" 2>/dev/null && n=$((n+1)); }
-    done
+      [ -e "$SYS64/$lb" ] && continue
+      cp -a "$l" "$SYS64/" 2>/dev/null && n=$((n+1))
+    done < <(find "$libdir" -maxdepth 2 \( -name '*.so' -o -name '*.so.*' \) 2>/dev/null)
     ok "  $n lib aarch64 -> $SYS64"
   fi
+  # link .so di usr/lib juga sering dipakai via nama absolut; pastikan tak
+  # menunjuk ke path yang hilang di /system/lib64 (buat symlink relatif).
+  [ -d "$SYS64" ] && for l in "$SYS64"/*.so; do
+    [ -L "$l" ] || continue
+    local t; t="$(readlink "$l")"
+    case "$t" in /*) [ -e "$SYS64/$(basename "$t")" ] || rm -f "$l" ;; esac
+  done 2>/dev/null || true
   local made=0 skip=0
   for f in "$bindir"/*; do
     [ -f "$f" ] || continue
