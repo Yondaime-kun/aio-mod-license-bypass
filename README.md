@@ -43,6 +43,19 @@ cd aio-mod-license-bypass
 aio
 ```
 
+**Kalau masih tampil `Gratis PENGGUNA` / minta password**, jalankan diagnose:
+```bash
+./patcher/diagnose.sh
+```
+Penyebab paling umum: paket Termux `python-pycryptodomex` **hanya menyediakan
+`Cryptodome`**, sedangkan engine meng-import **`Crypto`**. Patcher terbaru sudah
+otomatis membuat alias `Crypto -> Cryptodome`; kalau versi lama, perbaiki manual:
+```bash
+SP=$PREFIX/lib/python3.14/site-packages
+ln -sfn Cryptodome $SP/Crypto
+./patcher/patch-termux.sh install
+```
+
 ### Di Linux x86_64 (via qemu-aarch64-static)
 ```bash
 sudo apt install qemu-user-static binutils curl unzip
