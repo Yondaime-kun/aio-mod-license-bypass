@@ -1,10 +1,13 @@
 # Fake Crypto.Signature.eddsa — bypass license verify.
 # Tidak butuh cffi/Cryptodome internal. API-compatible untuk mode rfc8032.
+import os as _os
+_EDDSA_LOG = _os.environ.get("AIO_EDDSA_LOG",
+             _os.path.join(_os.path.expanduser("~"), ".aio-patcher", "eddsa_hook.log"))
 
 class _Verifier:
     def verify(self, msg_hash, signature):
         try:
-            with open('/tmp/eddsa_hook.log', 'a') as f:
+            with open(_EDDSA_LOG, 'a') as f:
                 f.write(f"[eddsa] verify BYPASS sig={bytes(signature)[:8].hex()}\n")
         except Exception:
             pass
@@ -13,7 +16,7 @@ class _Verifier:
 class _Signer:
     def sign(self, msg_hash):
         try:
-            with open('/tmp/eddsa_hook.log', 'a') as f:
+            with open(_EDDSA_LOG, 'a') as f:
                 f.write("[eddsa] sign called -> fake sig\n")
         except Exception:
             pass
@@ -25,7 +28,7 @@ class _Key:
 
 def new(key, mode=None, **kwargs):
     try:
-        with open('/tmp/eddsa_hook.log', 'a') as f:
+        with open(_EDDSA_LOG, 'a') as f:
             f.write(f"[eddsa] new key={type(key).__name__} mode={mode}\n")
     except Exception:
         pass

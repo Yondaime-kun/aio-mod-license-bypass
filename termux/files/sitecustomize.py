@@ -116,15 +116,19 @@ _install_net_redirect()
 
 # ── 3. license-gate monkeypatch watcher ──────────────────────────────────────
 _GATE_NAMES = (
-    "_aio_ed25519_payload_ok",
-    "_aio_server_free_verify",
-    "_aio_license_pin_ok",
+    # nama sebenarnya (dari ekstraksi dump memori runtime engine)
+    "_aio_ed25519_payload_ok",     # verifikasi signature payload (gate utama)
+    "_aio_license_pin_ok",         # verifikasi cert pin
+    "_aio_api_signed_payload_ok",  # verifikasi HMAC 'sig' respons
+    "_aio_server_free_verify",     # path gratis (jadikan lolos juga)
+    "_aio_server_device_check",    # panggilan /v1/device/check
+    "_aio_server_usage_check",
+    # nama lama (jaga-jaga kalau versi engine beda)
+    "_vip_server_verified",
+    "_aio_ed25519_verify",
     "_verify_pubkey_pin",
     "_verify_free_pass",
     "_verify_decode_block",
-    "_vip_server_verified",
-    "_aio_server_device_check",
-    "_aio_ed25519_verify",
 )
 _SUBMODULES = ("license", "license_client", "setup_tools", "login_system",
                "core", "utils", "login", "server", "verify")
@@ -172,7 +176,7 @@ def _watcher():
                     _patch_module(mod, name)
             # dump every aio-ish module once, to see what IS registered
             if not dumped:
-                aio_like = [n for n in sys.modules if "aio" in (n or "").lower()]
+                aio_like = [n for n in list(sys.modules) if "aio" in (n or "").lower()]
                 if aio_like:
                     dumped = True
                     _log(_PATCH_LOG, "[dump] aio modules: %s" % aio_like)
