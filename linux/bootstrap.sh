@@ -176,6 +176,16 @@ step_deps() {
            aapt2 apksigner apktool d8 dx ecj; do
     deb_fetch_extract "$p" || true
   done
+  mkdir -p "$TERMUX_USR/bin"
+  # openjdk Termux menaruh binernya di usr/lib/jvm/.../bin (bukan usr/bin);
+  # engine mencari 'java' via PATH -> sambungkan ke usr/bin.
+  for jb in "$TERMUX_USR"/lib/jvm/*/bin/java "$TERMUX_USR"/lib/jvm/*/bin/*; do
+    [ -x "$jb" ] || continue
+    local jn; jn="$(basename "$jb")"
+    [ -e "$TERMUX_USR/bin/$jn" ] || ln -sf "$jb" "$TERMUX_USR/bin/$jn" 2>/dev/null
+  done
+  [ -e "$TERMUX_USR/bin/java" ] && ok "  java -> \$(readlink -f "$TERMUX_USR/bin/java")" \
+    || warn "  java tak ditemukan di paket openjdk"
   # alias Cryptodome <- Crypto (pycryptodomex tidak menyediakan alias)
   if [ -d "$SPT/Crypto" ] && [ ! -d "$SPT/Cryptodome" ]; then
     ln -sfn Crypto "$SPT/Cryptodome" 2>/dev/null && ok "  alias Cryptodome -> Crypto dibuat"
