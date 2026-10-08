@@ -69,13 +69,18 @@ else
   no "sitecustomize.py TIDAK ada"
 fi
 
-hd "3b. Tes shim network (tanpa /etc/hosts)"
-if grep -q "aio.scwill.store" "$SP/sitecustomize.py" 2>/dev/null && \
-   grep -q "getaddrinfo" "$SP/sitecustomize.py" 2>/dev/null; then
-  ok "shim network terpasang (hostname license -> 127.0.0.1)"
-else
-  no "shim network TIDAK lengkap di sitecustomize"
-fi
+hd "3c. sitecustomize di lokasi yg dipindai Nuitka"
+_ok=0
+for loc in "$HOME_DIR/release/sitecustomize.py" "$HOME_DIR/.local/lib/python3.14/site-packages/sitecustomize.py"; do
+  if [ -e "$loc" ] && grep -q "aio.scwill.store" "$loc" 2>/dev/null; then
+    ok "ada + shim network: $loc"
+    _ok=1
+  elif [ -e "$loc" ]; then
+    wr "ada tapi TANPA shim network: $loc (versi lama?)"
+  fi
+done
+[ "$_ok" = 1 ] || no "sitecustomize TIDAK ada di lokasi yang dipindai engine (release/ atau .local/)"
+echo "     (Nuitka standalone scan CWD=release/, bukan site-packages)"
 
 hd "4. Sentinel .open_ssl_cache"
 [ -e "$PREFIX/share/.open_ssl_cache" ] && ok "ada" || no "HILANG — buat: touch $PREFIX/share/.open_ssl_cache"
