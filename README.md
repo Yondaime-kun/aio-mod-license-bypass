@@ -11,6 +11,19 @@ HWID ke server asli.
 
 ---
 
+## Status tested
+
+| Platform | Versi | Status | Cara redirect |
+|---|---|---|---|
+| **Linux x86_64 (Ubuntu 22.04, kernel 6.8)** | — | ✅ **VIP terverifikasi** | `/etc/hosts` + `fakelics.service` (systemd) + qemu-aarch64 |
+| **Termux aarch64 (Android)** | Python 3.14 | ⚠️ **belum VIP** — lagi dibenerin | shim `sitecustomize` (non-root) |
+
+> Di Termux, fake server **harus** jalan pakai Python bernacl
+> (`pkg install python-pynacl`). Kalau tidak, engine balas
+> *"Tanda tangan respons server tidak valid"* → jatuh ke mode Gratis.
+
+---
+
 ## Dua varian patcher (TERPISAH per platform)
 
 Kerja di satu platform **tidak mengganggu** yang lain:
