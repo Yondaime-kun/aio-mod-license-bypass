@@ -143,12 +143,38 @@ patch_server() {
   install -Dm644 "$FAKESRV" /opt/aio-patcher/fakelicstls.py
   install -Dm644 "$CERTS/lc2.pem"       /opt/aio-patcher/lc2.pem
   install -Dm600 "$CERTS/leaf.key"      /opt/aio-patcher/leaf.key
-  # Pilih python yg punya pynacl
+  # Pilih python yg punya pynacl. JANGAN hardcode path mesin tertentu —
+  # cari di python sistem, venv umum, dan python Termux (fake fs).
   local PY=""
-  for cand in /home/agentuser/.hermes/hermes-agent/venv/bin/python3 /usr/bin/python3; do
+  local cands=(
+    "$TERMUX_USR/bin/python3"
+    "$TERMUX_USR/bin/python3.14"
+    /usr/bin/python3
+    /usr/local/bin/python3
+    "$HOME/.venv/bin/python3"
+    /opt/aio-patcher/venv/bin/python3
+  )
+  for cand in "${cands[@]}"; do
     [ -x "$cand" ] && "$cand" -c 'import nacl' 2>/dev/null && { PY="$cand"; break; }
   done
-  [ -n "$PY" ] || die "  Tidak ada python dgn pynacl (pip install pynacl)"
+  # Belum ada: bikin venv sendiri + install pynacl (butuh internet + pip).
+  if [ -z "$PY" ]; then
+    if command -v python3 >/dev/null 2>&1; then
+      say "  pynacl belum ada — bikin venv + pip install..."
+      python3 -m venv /opt/aio-patcher/venv >/dev/null 2>&1 || true
+      /opt/aio-patcher/venv/bin/pip install --quiet pynacl >/dev/null 2>&1 || true
+      [ -x /opt/aio-patcher/venv/bin/python3 ] && \
+        /opt/aio-patcher/venv/bin/python3 -c 'import nacl' 2>/dev/null && \
+        PY=/opt/aio-patcher/venv/bin/python3
+    fi
+  fi
+  # Masih belum: server tetap bisa jalan TANPA pynacl (kirim ed25519_sig dummy;
+  # engine hanya CEK KEBERADAAN field itu, bukan verifikasi kripto).
+  [ -n "$PY" ] || PY="$(command -v python3 || echo /usr/bin/python3)"
+  [ -x "$PY" ] || die "  Tidak ada python3 untuk jalankan fake server"
+  "$PY" -c 'import nacl' 2>/dev/null \
+    && ok "  server python: $PY (pynacl)" \
+    || warn "  server python: $PY (TANPA pynacl — ed25519_sig dummy)"
   # tulis service dgn path absolut yg benar
   sed -e "s|/tmp/fakelicstls.py|/opt/aio-patcher/fakelicstls.py|" \
       -e "s|/tmp/lc2.pem|/opt/aio-patcher/lc2.pem|" \
