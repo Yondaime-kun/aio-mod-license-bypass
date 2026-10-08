@@ -234,8 +234,19 @@ ctx = ssl._create_unverified_context()
 try:
     s = ctx.wrap_socket(socket.create_connection(('127.0.0.1', $FAKE_TLS_PORT), timeout=5))
     s.sendall(b'POST /v1/device/check HTTP/1.1\r\nHost: aio.scwill.store\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}')
-    d = s.recv(4000)
-    print('is_vip' if b'is_vip' in d else 'NO_VIP:' + repr(d[:60]))
+    data = b''
+    s.settimeout(5)
+    while True:
+        try:
+            c = s.recv(4096)
+        except socket.timeout:
+            break
+        if not c:
+            break
+        data += c
+        if b'is_vip' in data:
+            break
+    print('is_vip' if b'is_vip' in data else 'NO_VIP:' + repr(data[:80]))
 except Exception as e:
     print('ERR:' + str(e))
 " 2>&1)
@@ -276,14 +287,17 @@ export HOME="$HOME_DIR"
 # PYTHONPATH: SITE-PACKAGES (utk fake eddsa) + RELEASE_DIR (utk sitecustomize)
 export PYTHONPATH="$SP:$RELEASE_DIR"
 # CA BUNDLE: engine memvalidasi TLS server thd trust store Python.
-# Buat bundle yg berisi CA palsu kita (root WE1 + leaf) + gabung dgn certifi,
-# lalu arahkan SSL_CERT_FILE/REQUESTS_CA_BUNDLE ke situ. Tanpa ini engine
+# Bundle = CA palsu kita (root WE1 + leaf) + certifi bawaan. Tanpa ini engine
 # menolak cert: TLSV1_ALERT_UNKNOWN_CA -> jatuh ke mode Gratis.
 CA_BUNDLE="$RUN_DIR/ca-bundle.pem"
-if [ ! -e "$CA_BUNDLE" ]; then
-  cat "$RUN_DIR/we1ca.pem" "$RUN_DIR/lc2.pem" "$SP/certifi/cacert.pem" > "$CA_BUNDLE" 2>/dev/null || true
+if [ ! -s "\$CA_BUNDLE" ]; then
+  cat "$RUN_DIR/we1ca.pem" "$RUN_DIR/lc2.pem" "$SP/certifi/cacert.pem" > "\$CA_BUNDLE" 2>/dev/null || true
 fi
-[ -s "$CA_BUNDLE" ] && { export SSL_CERT_FILE="$CA_BUNDLE"; export REQUESTS_CA_BUNDLE="$CA_BUNDLE"; export CURL_CA_BUNDLE="$CA_BUNDLE"; }
+if [ -s "\$CA_BUNDLE" ]; then
+  export SSL_CERT_FILE="\$CA_BUNDLE"
+  export REQUESTS_CA_BUNDLE="\$CA_BUNDLE"
+  export CURL_CA_BUNDLE="\$CA_BUNDLE"
+fi
 # PENTING: Nuitka standalone kadang tak scan PYTHONPATH utk sitecustomize.
 # Salin sitecustomize ke SEMUA lokasi yg mungkin dipindai interpreter:
 cp -f "$SP/sitecustomize.py" "$RELEASE_DIR/sitecustomize.py" 2>/dev/null
