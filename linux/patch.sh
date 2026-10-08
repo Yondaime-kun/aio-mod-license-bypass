@@ -257,6 +257,9 @@ patch_runner() {
 cd "$RELEASE_DIR" || exit 1
 export PREFIX="$TERMUX_USR"
 export HOME="$TERMUX_HOME"
+# engine mendeteksi dependency (java/clang/aapt/...) lewat PATH -> Termux bin
+# harus ada di depan, kalau tidak semua dianggap "belum tersedia".
+export PATH="$TERMUX_USR/bin:$TERMUX_USR/bin/applets:$PATH"
 # PERSIS environment yang terbukti jalan: LD_LIBRARY_PATH hanya /system/lib64
 # (semua lib aarch64 ada di sana), PYTHONPATH release dulu lalu site-packages.
 # JANGAN set PYTHONHOME (bikin interpreter salah nyari stdlib).
