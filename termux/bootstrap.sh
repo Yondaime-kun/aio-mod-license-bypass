@@ -4,7 +4,7 @@
 # =============================================================================
 #  Di Termux, engine aarch64 jalan NATIVE (tanpa qemu) dan runtime Python
 #  sudah tersedia via `pkg`. Jadi tidak perlu download .deb manual —
-#  cukup install paket, taruh engine, lalu jalankan patch-termux.sh.
+#  cukup install paket, taruh engine, lalu jalankan patch.sh.
 #
 #  Usage:  ./bootstrap-termux.sh
 # =============================================================================
@@ -61,9 +61,9 @@ step_engine() {
 # STEP 3 — Bypass license
 # =============================================================================
 step_bypass() {
-  say "Step 3/4  Terapkan bypass (patch-termux.sh)"
-  [ -x "$SELF_DIR/patch-termux.sh" ] || die "  patch-termux.sh tak ada"
-  "$SELF_DIR/patch-termux.sh" install
+  say "Step 3/4  Terapkan bypass (patch.sh)"
+  [ -x "$SELF_DIR/patch.sh" ] || die "  patch.sh tak ada"
+  "$SELF_DIR/patch.sh" install
 }
 
 # =============================================================================

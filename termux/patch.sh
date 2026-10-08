@@ -32,6 +32,8 @@ LICENSE_HOST="aio.scwill.store"
 RUN_DIR="$HOME_DIR/.aio-patcher"          # pengganti /opt (tak perlu root)
 SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FILES="$SELF_DIR/files"
+CERTS="$SELF_DIR/../shared/certs"
+FAKESRV="$SELF_DIR/../shared/fakelicstls.py"
 
 C_R="\033[0m"; C_G="\033[1;32m"; C_Y="\033[1;33m"; C_E="\033[1;31m"; C_C="\033[1;36m"
 say()  { echo -e "${C_C}▸${C_R} $*"; }
@@ -170,16 +172,17 @@ patch_dns() {
 patch_server() {
   say "Step 5/6  Fake TLS license server (:$FAKE_TLS_PORT, nohup)"
   mkdir -p "$RUN_DIR"
-  install -m644 "$FILES/fakelicstls.py" "$RUN_DIR/fakelicstls.py"
-  install -m644 "$SELF_DIR/certs/lc2.pem"   "$RUN_DIR/lc2.pem"
-  install -m600 "$SELF_DIR/certs/leaf.key"  "$RUN_DIR/leaf.key"
+  install -m644 "$FAKESRV" "$RUN_DIR/fakelicstls.py"
+  install -m644 "$CERTS/lc2.pem"   "$RUN_DIR/lc2.pem"
+  install -m600 "$CERTS/leaf.key"  "$RUN_DIR/leaf.key"
   # pilih python dgn pynacl (Termux: pkg install python-pynacl)
   local PY=""
   for cand in "$PREFIX/bin/python3" "$PREFIX/bin/python" python3; do
     command -v "$cand" >/dev/null 2>&1 && "$cand" -c 'import nacl' 2>/dev/null \
       && { PY="$cand"; break; }
   done
-  [ -n "$PY" ] || die "  pynacl belum ada: pkg install python-pynacl"
+  [ -n "$PY" ] || die "  pynacl belum ada: pkg install python-pynacl
+      (WAJIB: fake server harus tanda-tangan Ed25519 sungguhan pakai PyNaCl)"
   # matikan instans lama
   pkill -f "$RUN_DIR/fakelicstls.py" 2>/dev/null || true
   sleep 1
@@ -187,6 +190,24 @@ patch_server() {
   sleep 2
   if pgrep -f "$RUN_DIR/fakelicstls.py" >/dev/null; then
     ok "  fake server jalan (pid $(pgrep -f "$RUN_DIR/fakelicstls.py" | head -1))"
+    # verifikasi: server beneran bales JSON VIP
+    local resp
+    resp=$(python3 -c "
+import socket, ssl
+ctx = ssl._create_unverified_context()
+try:
+    s = ctx.wrap_socket(socket.create_connection(('127.0.0.1', $FAKE_TLS_PORT), timeout=4))
+    s.sendall(b'POST /v1/device/check HTTP/1.1\r\nHost: aio.scwill.store\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}')
+    d = s.recv(4000)
+    print('is_vip' if b'is_vip' in d else 'NO_VIP')
+except Exception as e:
+    print('ERR:' + str(e))
+" 2>/dev/null)
+    if [ "$resp" = "is_vip" ]; then
+      ok "  server bales JSON VIP (terverifikasi)"
+    else
+      warn "  server tidak bales VIP ($resp) — cek $RUN_DIR/fakelics.log"
+    fi
   else
     die "  fake server gagal start — cek $RUN_DIR/fakelics.log"
   fi

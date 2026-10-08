@@ -1,135 +1,71 @@
-# AIO-MOD Toolkit — License Bypass Research (VIP)
+# AIO-MOD Toolkit v3.5.2 — license bypass
 
-Reverse-engineering write-up + automated patcher untuk **AIO-MOD Toolkit v3.5.2**
-(release `willstore69/toolkit`), sebuah engine Python ter-*compile* Nuitka
-(CPython 3.14, aarch64/Android-Termux) yang dilindungi license wall Ed25519
-*fail-closed*.
+Reverse-engineering write-up + patcher untuk **AIO-MOD Toolkit v3.5.2**
+(release `willstore69/toolkit`), engine Python ter-*compile* Nuitka
+(CPython 3.14, aarch64/Android-Termux) dengan license wall Ed25519.
 
-Hasil akhir: engine berjalan di mode **`★ VIP MEMBER ★`** dengan 18 menu penuh
-terbuka, dan **tidak ada data (HWID) yang dikirim ke server asli**.
+Hasil: engine jalan di mode **`★ VIP MEMBER ★`** (18 menu), **tanpa** mengirim
+HWID ke server asli.
 
-> ⚠️ **Hanya untuk riset keamanan & lingkungan milik sendiri.** Tujuannya
-> mendokumentasikan teknik RE terhadap binary Python ter-*compile* + proteksi
-> license. Jangan pakai pada sistem yang bukan milikmu.
+> Riset keamanan pada perangkat/lingkungan sendiri.
 
 ---
 
-## Ringkasan temuan
+## Dua varian patcher (TERPISAH per platform)
 
-| Pertanyaan | Jawaban |
-|-----------|---------|
-| Ada bytecode Python untuk di-patch? | **Tidak** — Nuitka meng-*compile* ke kode C native. |
-| `strings` binary mengungkap logic? | **Tidak** — rodata terenkripsi, plaintext hanya di memory runtime. |
-| Titik masuk bypass? | **Import module** — engine tetap `import Crypto.Signature.eddsa` dari site-packages (bukan di-embed). |
-| Kenapa fail-closed bisa dilewati? | Verifier Ed25519 diganti fake `verify()` → `None` (pycryptodome: None = sukses). |
-| Bagaimana dengan cert-pin? | Fake TLS server lokal + CA palsu meniru issuer; pin "rotated" lolos. |
-| HWID terkirim ke server asli? | **Tidak** — fake server lokal, hosts redirect, + blokir IP asli. |
+Kerja di satu platform **tidak mengganggu** yang lain:
 
-Detail lengkap ada di **[WALKTHROUGH.md](WALKTHROUGH.md)**.
+| Platform | Folder | Root? | Redirect server |
+|---|---|---|---|
+| **Termux (Android)** | `termux/` | ❌ non-root | shim Python (`sitecustomize`) |
+| **Linux / VPS (x86_64)** | `linux/` | ✅ sudo | `/etc/hosts` + systemd |
+| Komponen bersama | `shared/` | — | fake TLS server + certs |
 
----
+## Prinsip kerja
 
-## Cara pakai — FULL AUTO (engine di-download otomatis)
+1. **Fake license server** (`shared/fakelicstls.py`) menandatangani respons
+   **Ed25519 sungguhan pakai PyNaCl** → engine menerima mode VIP.
+   **Wajib** dijalankan dengan Python yang punya `nacl`:
+   `pkg install python-pynacl` (Termux).
+2. Engine menghubungi `aio.scwill.store:8443` → diarahkan ke server lokal.
+3. Fake `Crypto/Cryptodome.Signature.eddsa` dipasang sebagai lapisan tambahan.
 
-**Tidak perlu download apa pun manual.** Bootstrap mengunduh engine + runtime
-sendiri.
+## Pakai
 
-### Di Termux (aarch64 native) — paling gampang
+### Termux (non-root) — TANPA sudo
 ```bash
 pkg install git
 git clone https://github.com/Yondaime-kun/aio-mod-license-bypass.git
-cd aio-mod-license-bypass
-./patcher/bootstrap-termux.sh    # install paket + download engine + bypass
+cd aio-mod-license-bypass/termux
+./bootstrap.sh
 aio
 ```
+Detail: [`termux/README.md`](termux/README.md)
 
-> **Termux NON-ROOT sudah cukup.** Jangan pakai `sudo` (Termux gak punya sudo).
-> Semua path (`$PREFIX`, `~/release`) milik user sendiri. `/etc/hosts` & iptables
-> **tidak** dipakai — redirect license server dilakukan di layer Python
-> (`sitecustomize`), jadi tetap jalan tanpa root.
-
-**Kalau masih tampil `Gratis PENGGUNA` / minta password**, jalankan diagnose:
+### Linux / VPS (sudo)
 ```bash
-./patcher/diagnose.sh
-```
-Penyebab paling umum: paket Termux `python-pycryptodomex` **hanya menyediakan
-`Cryptodome`**, sedangkan engine meng-import **`Crypto`**. Patcher terbaru sudah
-otomatis membuat alias `Crypto -> Cryptodome`; kalau versi lama, perbaiki manual:
-```bash
-SP=$PREFIX/lib/python3.14/site-packages
-ln -sfn Cryptodome $SP/Crypto
-./patcher/patch-termux.sh install
-```
-
-### Di Linux x86_64 (via qemu-aarch64-static)
-```bash
-sudo apt install qemu-user-static binutils curl unzip
+sudo apt install qemu-user-static binutils curl unzip python3-pynacl
 git clone https://github.com/Yondaime-kun/aio-mod-license-bypass.git
-cd aio-mod-license-bypass
-sudo ./patcher/bootstrap.sh      # download engine + Termux .deb + deps + bypass
-sudo aio
+cd aio-mod-license-bypass/linux
+sudo ./bootstrap.sh
+aio
 ```
+Detail: [`linux/README.md`](linux/README.md)
 
-**Apa yang di-download bootstrap:**
-- Engine `aio-mod` dari GitHub release upstream (`willstore69/toolkit` @ 3.5)
-- Runtime Python 3.14 + deps (`.deb` dari repo resmi Termux)
-- Wheel pure-python (certifi/requests/tqdm/...) via pip
-- Bypass license diterapkan otomatis (memanggil `patch.sh`)
+## Troubleshooting
 
-> Kalau mau pakai engine yang sudah ada (taruh sendiri di `~/release/aio-mod`),
-> bootstrap akan mendeteksi & melewati langkah download.
+| Gejala | Penyebab / cek |
+|---|---|
+| `[ Gratis PENGGUNA ]` + `Koneksi Gagal` | fake server hidup? `python -c "import nacl"` |
+| `Tanda tangan respons server tidak valid` | fake server **harus** pakai Python bernacl |
+| Loading bar numpuk newline | bar 92 char > lebar layar → perkecil font / landscape |
+| Termux `Koneksi Gagal` | shim DNS di `sitecustomize` + fake server |
 
-### Perintah umum
-```bash
-./patcher/patch.sh verify     # cek status semua komponen (VPS)
-./patcher/patch.sh revert     # kembalikan ke kondisi asli
-./patcher/patch-termux.sh verify   # versi Termux
+## Struktur
 ```
-
-Patcher bersifat **idempotent** — aman dijalankan berulang. Setiap file yang
-di-patch di-backup `.asli` sebelum ditimpa.
-
----
-
-## Isi repo
-
+├── termux/       patcher non-root (Android)
+├── linux/        patcher sudo (systemd/qemu)
+├── shared/       fake TLS server + certs
+├── FINDINGS.md   catatan RE
+└── WALKTHROUGH.md
 ```
-patcher/
-├── bootstrap.sh          # ★ FULL AUTO: download engine + runtime + bypass (x86)
-├── bootstrap-termux.sh   # ★ FULL AUTO (Termux native)
-├── patch.sh              # patcher Linux/x86 (qemu + systemd)
-├── patch-termux.sh       # patcher Termux native (aarch64, tanpa qemu)
-├── files/
-│   ├── eddsa_fake.py     # verifier Ed25519 palsu (inti bypass)
-│   ├── fakelicstls.py    # fake license TLS server
-│   ├── fakelics.service  # unit systemd (VPS)
-│   └── aio-patch.service
-└── certs/                # CA + leaf palsu (buatan sendiri, bukan kunci asli)
-    ├── lc2.pem
-    ├── leaf.key
-    └── we1ca.pem
-```
-
-**Tidak disertakan** (lihat `.gitignore`): engine `aio-mod` (~27 MB) dan semua
-dump memori/artefak RE — tapi **`bootstrap.sh` mengunduhnya otomatis**, jadi
-kamu tetap tak perlu ambil manual.
-
----
-
-## Environment yang dibutuhkan
-
-- Engine asli `aio-mod` (release 3.5) — **tidak** disertakan, ambil dari upstream.
-- Termux: `python`, `python-pycryptodomex` (atau paket `Crypto`/`Cryptodome`),
-  `python-pynacl`.
-- x86_64: `qemu-user-static`, `systemd`, `python3-pynacl`.
-- Engine harus dijalankan dari CWD `release/` dengan path relatif `./aio-mod`.
-
-## Keamanan / privasi
-
-- Fake server **tidak** membuka koneksi keluar (tidak ada `socket.connect` /
-  `requests`); hanya listen lokal & menulis log lokal.
-- Patcher VPS menambah `iptables REJECT` + blackhole route ke IP server asli,
-  sehingga HWID tak mungkin sampai ke sana meskipun engine punya DoH resolver
-  sendiri yang mengabaikan `/etc/hosts`.
-- Di Termux non-root: jaring pengaman = hosts redirect + fake server lokal
-  (opsional: mode pesawat / firewall Android).

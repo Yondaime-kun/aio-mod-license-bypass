@@ -31,7 +31,8 @@ LICENSE_HOST="aio.scwill.store"
 LICENSE_IPS="172.67.143.135 104.21.46.254"
 SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FILES="$SELF_DIR/files"
-CERTS="$SELF_DIR/certs"
+CERTS="$SELF_DIR/../shared/certs"
+FAKESRV="$SELF_DIR/../shared/fakelicstls.py"
 
 C_R="\033[0m"; C_G="\033[1;32m"; C_Y="\033[1;33m"; C_E="\033[1;31m"; C_C="\033[1;36m"
 say()  { echo -e "${C_C}▸${C_R} $*"; }
@@ -139,7 +140,7 @@ patch_dns_ca() {
 # =============================================================================
 patch_server() {
   say "Step 5/7  Fake TLS license server (:$FAKE_TLS_PORT)"
-  install -Dm644 "$FILES/fakelicstls.py" /opt/aio-patcher/fakelicstls.py
+  install -Dm644 "$FAKESRV" /opt/aio-patcher/fakelicstls.py
   install -Dm644 "$CERTS/lc2.pem"       /opt/aio-patcher/lc2.pem
   install -Dm600 "$CERTS/leaf.key"      /opt/aio-patcher/leaf.key
   # Pilih python yg punya pynacl
