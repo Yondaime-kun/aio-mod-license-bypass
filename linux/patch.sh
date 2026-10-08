@@ -265,7 +265,13 @@ do_verify() {
   grep -q "upgrade dilewati" /usr/bin/apt 2>/dev/null && ok "  shim apt aktif" || warn "  shim apt belum (opsional)"
   [ -e "$SHARE/.open_ssl_cache" ] && ok "  .open_ssl_cache ok" || { err "  .open_ssl_cache hilang"; fail=1; }
   grep -q "$LICENSE_HOST" /etc/hosts && ok "  hosts redirect ok" || { err "  hosts belum redirect"; fail=1; }
-  systemctl is-active --quiet fakelics.service && ok "  fake TLS server aktif" || { err "  fake TLS server mati"; fail=1; }
+  # server bisa via systemd ATAU nohup (container tanpa systemd)
+  if { systemctl is-active --quiet fakelics.service 2>/dev/null; } \
+     || pgrep -f "aio-patcher/fakelicstls.py" >/dev/null 2>&1; then
+    ok "  fake TLS server aktif"
+  else
+    err "  fake TLS server mati"; fail=1
+  fi
   # cek anti-exfil (soft check: warn, bukan fail keras)
   local blk=0
   for ip in $LICENSE_IPS; do
