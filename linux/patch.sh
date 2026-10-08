@@ -24,6 +24,7 @@ TERMUX_HOME="/data/data/com.termux/files/home"
 RELEASE_DIR="$TERMUX_HOME/release"
 SP="$TERMUX_USR/lib/python3.14/site-packages"
 SHARE="$TERMUX_USR/share"
+SYS64="/system/lib64"
 FAKE_TLS_PORT=8443
 LICENSE_HOST="aio.scwill.store"
 # IP asli server license (Cloudflare) — diblokir sbg jaring pengaman kalau
@@ -244,9 +245,12 @@ patch_runner() {
 cd "$RELEASE_DIR" || exit 1
 export PREFIX="$TERMUX_USR"
 export HOME="$TERMUX_HOME"
-export PYTHONPATH="$SP"
-export LD_LIBRARY_PATH="$SYS64:$TERMUX_USR/lib:$TERMUX_USR/lib/python3.14/lib-dynload"
-exec qemu-aarch64-static ./aio-mod "\$@"
+export PYTHONPATH="$SP:$RELEASE_DIR"
+# LD_LIBRARY_PATH: lib bionic (qemu) + lib Termux + lib-dynload (libz dll)
+export LD_LIBRARY_PATH="$SYS64:$TERMUX_USR/lib:$TERMUX_USR/lib/python3.14/lib-dynload\${LD_LIBRARY_PATH:+:\$LD_LIBRARY_PATH}"
+export COLUMNS="\${COLUMNS:-80}"
+QEMU="\$(command -v qemu-aarch64-static || echo /usr/bin/qemu-aarch64-static)"
+exec "\$QEMU" ./aio-mod "\$@"
 EOF
   chmod +x /usr/local/bin/aio
   ok "  /usr/local/bin/aio siap (jalankan: sudo aio)"
