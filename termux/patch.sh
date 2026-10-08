@@ -190,23 +190,28 @@ patch_server() {
   sleep 2
   if pgrep -f "$RUN_DIR/fakelicstls.py" >/dev/null; then
     ok "  fake server jalan (pid $(pgrep -f "$RUN_DIR/fakelicstls.py" | head -1))"
-    # verifikasi: server beneran bales JSON VIP
+    # verifikasi: server beneran bales JSON VIP.
+    # PENTING: pakai $PY (python yg punya nacl) utk probe, bukan python3 sembarang.
     local resp
-    resp=$(python3 -c "
+    resp=$("$PY" -c "
 import socket, ssl
 ctx = ssl._create_unverified_context()
 try:
-    s = ctx.wrap_socket(socket.create_connection(('127.0.0.1', $FAKE_TLS_PORT), timeout=4))
+    s = ctx.wrap_socket(socket.create_connection(('127.0.0.1', $FAKE_TLS_PORT), timeout=5))
     s.sendall(b'POST /v1/device/check HTTP/1.1\r\nHost: aio.scwill.store\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}')
     d = s.recv(4000)
-    print('is_vip' if b'is_vip' in d else 'NO_VIP')
+    print('is_vip' if b'is_vip' in d else 'NO_VIP:' + repr(d[:60]))
 except Exception as e:
     print('ERR:' + str(e))
-" 2>/dev/null)
+" 2>&1)
     if [ "$resp" = "is_vip" ]; then
       ok "  server bales JSON VIP (terverifikasi)"
     else
-      warn "  server tidak bales VIP ($resp) — cek $RUN_DIR/fakelics.log"
+      warn "  server GAGAL bales VIP -> $resp"
+      echo "  --- 8 baris terakhir $RUN_DIR/fakelics.log:"
+      tail -8 "$RUN_DIR/fakelics.log" 2>/dev/null | sed 's/^/      /'
+      echo "  --- cek python '$PY' punya nacl?"
+      "$PY" -c "import nacl; print('      nacl OK', nacl.__version__)" 2>&1 | sed 's/^/      /'
     fi
   else
     die "  fake server gagal start — cek $RUN_DIR/fakelics.log"
