@@ -121,7 +121,7 @@ deb_fetch_extract() {
     fi
     [ -n "$url" ] || { warn "  paket tak ditemukan di index: $pkg"; return 1; }
     say "    fetch $pkg"
-    curl -fL --retry 3 --connect-timeout 15 --max-time 180 -o "$deb" "$TERMUX_REPO_BASE/$url" || { warn "  download $pkg gagal"; return 1; }
+    curl -fL --retry 3 --connect-timeout 15 --max-time 600 -o "$deb" "$TERMUX_REPO_BASE/$url" || { warn "  download $pkg gagal"; return 1; }
   fi
   rm -rf "$WORKDIR/x_$pkg"
   dpkg-deb -x "$deb" "$WORKDIR/x_$pkg" 2>/dev/null || { warn "  extract $pkg gagal"; return 1; }
@@ -170,7 +170,7 @@ step_deps() {
   # (java, zip, 7z, aapt, zipalign, clang, ndk-multilib, smali/baksmali via
   # resource zip). Tanpa ini, VIP tetap jalan tapi menu modding APK gagal.
   say "  4a2. dependency toolkit (java/zip/7z/aapt/apktool/clang/ndk)"
-  for p in openjdk-21 openjdk-17 zip p7zip aapt android-tools clang lld llvm \
+  for p in openjdk-21 openjdk-17 zip 7zip aapt android-tools clang lld llvm \
            libcompiler-rt make cmake libc++ ndk-multilib \
            ndk-multilib-native-static ndk-multilib-native-stubs ndk-sysroot \
            aapt2 apksigner apktool d8 dx ecj; do
