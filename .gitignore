@@ -35,8 +35,8 @@ memdump*.py
 *token*
 *.pem
 *.key
-!patcher/certs/*.pem
-!patcher/certs/*.key
+!shared/certs/*.pem
+!shared/certs/*.key
 
 # ─── Backup lokal file yang di-patch ─────────────────────────────────────────
 *.asli
