@@ -214,64 +214,31 @@ step_deps() {
 # Jadi step ini memastikan lib dari deb dipindah juga ke /system/lib64
 # (sebagian engine mencarinya di sana), + verifikasi.
 step_bionic() {
-  say "Step 5/6  Libs aarch64 (libpython + libandroid dari release -> /system/lib64)"
-  mkdir -p "$SYS64"
-  # Engine 27MB butuh libpython3.14.so + libandroid-support.so yang SPESIFIK
-  # (bukan versi .deb Termux biasa). Ambil dari release bypass + verifikasi md5.
-  # delimiter '|' (bukan ':' — URL mengandung ':')
-  for pair in "libpython3.14.so|$LIBPY_URL|$LIBPY_MD5"; do
-    local name="${pair%%|*}"
-    local rest="${pair#*|}"
-    local url="${rest%%|*}"
-    local md5="${rest##*|}"
-    local dst="$SYS64/$name"
-    if [ -s "$dst" ] && [ "$(md5sum "$dst" | cut -d' ' -f1)" = "$md5" ]; then
-      ok "  $name sudah ada & md5 cocok"
-      continue
-    fi
-    say "  download $name"
-    if curl -fL --retry 3 --connect-timeout 15 --max-time 240 -o "$dst.tmp" "$url"; then
-      local got; got="$(md5sum "$dst.tmp" | cut -d' ' -f1)"
-      if [ "$got" = "$md5" ]; then
-        mv -f "$dst.tmp" "$dst"; chmod 644 "$dst"
-        ok "  $name terpasang ($(stat -c%s "$dst") bytes)"
-      else
-        rm -f "$dst.tmp"; warn "  $name md5 salah ($got) — dilewati"
-      fi
-    else
-      warn "  $name gagal diunduh"
-    fi
-  done
-  # lib lain dari .deb Termux: copy SEMUA .so agar linker bionic menemukannya
-  # (libz, libbz2, liblzma, libsqlite, libffi, libsodium, libssl, libcrypto...).
-  local src="$TERMUX_USR/lib"
-  if [ -d "$src" ]; then
-    for f in "$src"/*.so "$src"/*.so.*; do
-      [ -e "$f" ] || continue
-      local b; b="$(basename "$f")"
-      [ "$b" = "libpython3.14.so" ] && continue   # versi dari release dipakai
-      [ -e "$SYS64/$b" ] || cp -a "$f" "$SYS64/" 2>/dev/null || true
-    done
-    ok "  lib Termux disalin ke $SYS64"
-  fi
-
-  # BIONIC: engine ELF nya PT_INTERP = /system/bin/linker64 (WAJIB ada, kalau
-  # tidak qemu-aarch64-static gagal "Could not open '/system/bin/linker64'").
-  # linker64 + libc bionic tidak ada di .deb Termux biasa -> ambil dari release.
-  if [ ! -s /system/bin/linker64 ]; then
-    local bl="$WORKDIR/bionic-libs.tar.gz"
-    say "  download bionic libs (linker64 + libc)"
-    if curl -fL --retry 3 --connect-timeout 15 --max-time 240 -o "$bl" "$BIONIC_URL"; then
-      mkdir -p /system/bin "$SYS64"
-      tar -xzf "$bl" -C / 2>/dev/null && chmod 755 /system/bin/linker64 2>/dev/null || true
-      [ -s /system/bin/linker64 ] && ok "  /system/bin/linker64 siap" || warn "  linker64 gagal extract"
+  say "Step 5/6  Libs aarch64 (bionic lengkap + libpython -> /system/lib64)"
+  mkdir -p "$SYS64" /system/bin
+  # Satu tar berisi SELURUH closure yang engine butuh: linker64 (PT_INTERP),
+  # libc/libc++/liblog/libz/libbz2/libffi/libsodium/libcrypto/libssl/libsqlite...
+  # Termasuk libpython3.14.so versi spesifik. Sumber: environment yang terbukti
+  # jalan. Diambil dari release bypass + verifikasi md5.
+  local bl="$WORKDIR/bionic-libs.tar.gz"
+  local need=1
+  # sudah lengkap kalau linker64 + libpython3.14 + libz.so.1 + libc++.so ada
+  [ -s /system/bin/linker64 ] && [ -s "$SYS64/libpython3.14.so" ] \
+    && [ -e "$SYS64/libz.so.1" ] && [ -e "$SYS64/libc++.so" ] && need=0
+  if [ "$need" = 1 ]; then
+    say "  download bionic libs lengkap"
+    if curl -fL --retry 3 --connect-timeout 15 --max-time 300 -o "$bl" "$BIONIC_URL"; then
+      tar -xzf "$bl" -C / 2>/dev/null || warn "  extract bionic gagal"
+      chmod 755 /system/bin/linker64 2>/dev/null || true
+      ok "  bionic libs -> /system (+$SYS64)"
     else
       warn "  bionic libs gagal diunduh — engine tak akan jalan"
     fi
   else
-    ok "  /system/bin/linker64 sudah ada"
+    ok "  bionic libs sudah lengkap"
   fi
-  [ -s "$SYS64/libpython$PY_MAJOR.so" ] \
+  # libpython: pakai versi dari bionic bundle. Pastikan ada.
+  [ -s "$SYS64/libpython3.14.so" ] \
     && ok "  libpython$PY_MAJOR tersedia" \
     || warn "  libpython$PY_MAJOR belum ada — engine akan gagal load"
 }

@@ -245,9 +245,11 @@ patch_runner() {
 cd "$RELEASE_DIR" || exit 1
 export PREFIX="$TERMUX_USR"
 export HOME="$TERMUX_HOME"
-export PYTHONPATH="$SP:$RELEASE_DIR"
-# LD_LIBRARY_PATH: lib bionic (qemu) + lib Termux + lib-dynload (libz dll)
-export LD_LIBRARY_PATH="$SYS64:$TERMUX_USR/lib:$TERMUX_USR/lib/python3.14/lib-dynload\${LD_LIBRARY_PATH:+:\$LD_LIBRARY_PATH}"
+# PERSIS environment yang terbukti jalan: LD_LIBRARY_PATH hanya /system/lib64
+# (semua lib aarch64 ada di sana), PYTHONPATH release dulu lalu site-packages.
+# JANGAN set PYTHONHOME (bikin interpreter salah nyari stdlib).
+export PYTHONPATH="$RELEASE_DIR:$SP"
+export LD_LIBRARY_PATH="$SYS64"
 export COLUMNS="\${COLUMNS:-80}"
 QEMU="\$(command -v qemu-aarch64-static || echo /usr/bin/qemu-aarch64-static)"
 exec "\$QEMU" ./aio-mod "\$@"
