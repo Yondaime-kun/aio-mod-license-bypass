@@ -1,0 +1,20 @@
+[Unit]
+Description=AIO Mod Engine Test
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/data/data/com.termux/files/home/release
+Environment=PREFIX=/data/data/com.termux/files/usr
+Environment=HOME=/data/data/com.termux/files/home
+Environment=PYTHONPATH=/data/data/com.termux/files/usr/lib/python3.14/site-packages
+Environment=LD_LIBRARY_PATH=/system/lib64
+StandardInput=null
+StandardOutput=file:/tmp/engine_patched.log
+StandardError=file:/tmp/engine_patched.log
+ExecStart=/usr/bin/qemu-aarch64-static ./aio-mod
+TimeoutStartSec=600
+Restart=no
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,16 @@
+[Unit]
+Description=AIO-MOD Fake License TLS Server
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /opt/aio-patcher/fakelicstls.py
+WorkingDirectory=/opt/aio-patcher
+StandardInput=null
+StandardOutput=file:/var/log/aio-fakelics.log
+StandardError=append:/var/log/aio-fakelics.log
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

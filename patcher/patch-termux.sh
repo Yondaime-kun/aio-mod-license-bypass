@@ -1,0 +1,237 @@
+#!/data/data/com.termux/files/usr/bin/bash
+# =============================================================================
+#  AIO-MOD TOOLKIT v3.5.2  —  LICENSE BYPASS PATCHER  (TERMUX NATIVE)
+# =============================================================================
+#  Versi ini untuk dijalankan LANGSUNG di Termux (aarch64 Android native),
+#  bukan di VPS x86_64 via qemu. Perbedaan vs patch.sh (VPS):
+#
+#    VPS/x86              ->  Termux native
+#    ─────────────────────────────────────────────
+#    qemu-aarch64-static  ->  LANGSUNG jalankan ./aio-mod (native aarch64)
+#    /system/lib64        ->  $PREFIX/lib (libc Termux native)
+#    fake Termux FS       ->  SUDAH Termux asli
+#    systemd service      ->  nohup / Termux:Boot (Android tak ada systemd)
+#    iptables             ->  tak perlu (TIDAK ada jalur keluar ke server asli
+#                             kalau hosts + fake server sudah lokal; Android
+#                             non-root juga tak punya iptables)
+#
+#  Yang TETAP sama: fake Crypto.Signature.eddsa + sitecustomize + sentinel +
+#  hosts redirect + fake TLS server. Inti bypass identik.
+#
+#  Usage:  ./patch-termux.sh [install|verify|revert]
+# =============================================================================
+set -euo pipefail
+
+PREFIX="${PREFIX:-/data/data/com.termux/files/usr}"
+HOME_DIR="${HOME:-/data/data/com.termux/files/home}"
+SP="$PREFIX/lib/python3.14/site-packages"
+SHARE="$PREFIX/share"
+RELEASE_DIR="$HOME_DIR/release"
+FAKE_TLS_PORT=8443
+LICENSE_HOST="aio.scwill.store"
+RUN_DIR="$HOME_DIR/.aio-patcher"          # pengganti /opt (tak perlu root)
+SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+FILES="$SELF_DIR/files"
+
+C_R="\033[0m"; C_G="\033[1;32m"; C_Y="\033[1;33m"; C_E="\033[1;31m"; C_C="\033[1;36m"
+say()  { echo -e "${C_C}▸${C_R} $*"; }
+ok()   { echo -e "${C_G}✓${C_R} $*"; }
+warn() { echo -e "${C_Y}!${C_R} $*"; }
+err()  { echo -e "${C_E}×${C_R} $*" >&2; }
+die()  { err "$*"; exit 1; }
+
+# Deteksi Termux: PREFIX harus berisi pola com.termux DAN python TERMUX asli
+# (bukan fake FS di VPS x86 — bedakan via uname arch + keberadaan $PREFIX/lib/libpython)
+IS_TERMUX=0
+case "$PREFIX" in
+  */com.termux/*|*/com.termux) IS_TERMUX=1 ;;
+esac
+# VPS x86 emulasi: uname x86_64 -> bukan Termux asli
+[ "$(uname -m)" = "aarch64" ] && [ "$IS_TERMUX" = 1 ] || {
+  if [ "$(uname -m)" != "aarch64" ]; then
+    die "Patcher Termux ini butuh arsitektur aarch64 (Termux asli). Di x86 pakai patch.sh."
+  fi
+}
+
+# =============================================================================
+# STEP 1 — Fake Ed25519 verifier (yang menyembuhkan license wall)
+# =============================================================================
+patch_eddsa() {
+  say "Step 1/6  Fake Ed25519 verifier (Crypto + Cryptodome)"
+  [ -f "$FILES/eddsa_fake.py" ] || die "  eddsa_fake.py tak ada di $FILES"
+  local found=0
+  for base in Crypto Cryptodome; do
+    local tgt="$SP/$base/Signature/eddsa.py"
+    [ -e "$tgt" ] || { warn "  $tgt tak ada — $base belum terpasang"; continue; }
+    [ -e "$tgt.asli" ] || cp -a "$tgt" "$tgt.asli"
+    cp "$FILES/eddsa_fake.py" "$tgt"
+    rm -rf "$SP/$base/Signature/__pycache__"
+    ok "  $base/Signature/eddsa.py -> fake"
+    found=1
+  done
+  [ "$found" = 1 ] || die "  pycryptodome belum terpasang: pkg install python-pycryptodomex"
+}
+
+# =============================================================================
+# STEP 2 — sitecustomize (spoof uid; di Termux native getuid biasanya sudah 0/10123,
+#          tapi tetap pasang utk konsistensi)
+# =============================================================================
+patch_sitecustomize() {
+  say "Step 2/6  sitecustomize (spoof os.getuid)"
+  local tgt="$SP/sitecustomize.py"
+  [ -e "$tgt" ] && [ ! -e "$tgt.asli" ] && cp -a "$tgt" "$tgt.asli"
+  cat > "$tgt" <<'PYEOF'
+import os as _os
+try:
+    _os.getuid = lambda: 2000
+    _os.geteuid = lambda: 2000
+except Exception:
+    pass
+PYEOF
+  rm -rf "$SP/__pycache__"
+  ok "  sitecustomize.py terpasang"
+}
+
+# =============================================================================
+# STEP 3 — Sentinel .open_ssl_cache
+# =============================================================================
+patch_sentinel() {
+  say "Step 3/6  Sentinel .open_ssl_cache"
+  mkdir -p "$SHARE"
+  [ -e "$SHARE/.open_ssl_cache" ] || touch "$SHARE/.open_ssl_cache"
+  chmod 666 "$SHARE/.open_ssl_cache" 2>/dev/null || true
+  ok "  $SHARE/.open_ssl_cache siap"
+}
+
+# =============================================================================
+# STEP 4 — Redirect DNS (butuh root; di Termux non-root -> pakai alternatif)
+# =============================================================================
+patch_dns() {
+  say "Step 4/6  Redirect DNS $LICENSE_HOST -> 127.0.0.1"
+  if [ -w /etc/hosts ] 2>/dev/null; then
+    grep -q "$LICENSE_HOST" /etc/hosts || echo "127.0.0.1 $LICENSE_HOST" >> /etc/hosts
+    ok "  /etc/hosts diupdate"
+  elif command -v su >/dev/null 2>&1 && su -c "true" 2>/dev/null; then
+    su -c "grep -q '$LICENSE_HOST' /etc/hosts || echo '127.0.0.1 $LICENSE_HOST' >> /etc/hosts"
+    ok "  /etc/hosts diupdate (via su)"
+  else
+    warn "  /etc/hosts tak bisa ditulis (non-root)."
+    warn "  ALTERNATIF: engine akan tetap coba resolve; karena fake server"
+    warn "  listen di 127.0.0.1:8443 dan tidak ada jalur DoH yg sukses ke"
+    warn "  server asli saat di mobil, bypass TETAP jalan krn verifier sudah"
+    warn "  di-patch. hosts hanya mempercepat/merapikan."
+  fi
+}
+
+# =============================================================================
+# STEP 5 — Fake TLS server (nohup, BUKAN systemd)
+# =============================================================================
+patch_server() {
+  say "Step 5/6  Fake TLS license server (:$FAKE_TLS_PORT, nohup)"
+  mkdir -p "$RUN_DIR"
+  install -m644 "$FILES/fakelicstls.py" "$RUN_DIR/fakelicstls.py"
+  install -m644 "$SELF_DIR/certs/lc2.pem"   "$RUN_DIR/lc2.pem"
+  install -m600 "$SELF_DIR/certs/leaf.key"  "$RUN_DIR/leaf.key"
+  # pilih python dgn pynacl (Termux: pkg install python-pynacl)
+  local PY=""
+  for cand in "$PREFIX/bin/python3" "$PREFIX/bin/python" python3; do
+    command -v "$cand" >/dev/null 2>&1 && "$cand" -c 'import nacl' 2>/dev/null \
+      && { PY="$cand"; break; }
+  done
+  [ -n "$PY" ] || die "  pynacl belum ada: pkg install python-pynacl"
+  # matikan instans lama
+  pkill -f "$RUN_DIR/fakelicstls.py" 2>/dev/null || true
+  sleep 1
+  nohup "$PY" "$RUN_DIR/fakelicstls.py" >> "$RUN_DIR/fakelics.log" 2>&1 &
+  sleep 2
+  if pgrep -f "$RUN_DIR/fakelicstls.py" >/dev/null; then
+    ok "  fake server jalan (pid $(pgrep -f "$RUN_DIR/fakelicstls.py" | head -1))"
+  else
+    die "  fake server gagal start — cek $RUN_DIR/fakelics.log"
+  fi
+  # helper start/stop
+  cat > "$RUN_DIR/start-server.sh" <<EOF
+#!/data/data/com.termux/files/usr/bin/bash
+pkill -f "$RUN_DIR/fakelicstls.py" 2>/dev/null || true
+sleep 1
+nohup "$PY" "$RUN_DIR/fakelicstls.py" >> "$RUN_DIR/fakelics.log" 2>&1 &
+echo "fake server started"
+EOF
+  chmod +x "$RUN_DIR/start-server.sh"
+}
+
+# =============================================================================
+# STEP 6 — Runner $PREFIX/bin/aio (native, TANPA qemu)
+# =============================================================================
+patch_runner() {
+  say "Step 6/6  Runner $PREFIX/bin/aio  (native aarch64)"
+  cat > "$PREFIX/bin/aio" <<EOF
+#!/data/data/com.termux/files/usr/bin/bash
+# Jalankan engine langsung (native — Termux sudah aarch64).
+cd "$RELEASE_DIR" || { echo "dir release tak ada: $RELEASE_DIR"; exit 1; }
+export PREFIX="$PREFIX"
+export HOME="$HOME_DIR"
+export PYTHONPATH="$SP"
+# pastikan fake server hidup
+pgrep -f "$RUN_DIR/fakelicstls.py" >/dev/null 2>&1 || "$RUN_DIR/start-server.sh" >/dev/null 2>&1
+./aio-mod "\$@"
+EOF
+  chmod +x "$PREFIX/bin/aio"
+  ok "  $PREFIX/bin/aio siap (jalankan: aio)"
+}
+
+# =============================================================================
+# VERIFY
+# =============================================================================
+do_verify() {
+  say "Verifikasi"
+  local fail=0
+  for base in Crypto Cryptodome; do
+    local f="$SP/$base/Signature/eddsa.py"
+    [ -e "$f" ] || continue
+    grep -qi "bypass license verify" "$f" 2>/dev/null \
+      && ok "  fake: $base" || { err "  BUKAN fake: $base"; fail=1; }
+  done
+  grep -q "getuid" "$SP/sitecustomize.py" 2>/dev/null && ok "  sitecustomize ok" || { err "  sitecustomize kosong"; fail=1; }
+  [ -e "$SHARE/.open_ssl_cache" ] && ok "  .open_ssl_cache ok" || { err "  sentinel hilang"; fail=1; }
+  pgrep -f "$RUN_DIR/fakelicstls.py" >/dev/null && ok "  fake TLS server aktif" || { err "  fake server mati"; fail=1; }
+  [ -x "$PREFIX/bin/aio" ] && ok "  runner 'aio' ok" || { err "  runner hilang"; fail=1; }
+  [ -d "$RELEASE_DIR" ] && ok "  release dir ok" || warn "  release dir belum ada: $RELEASE_DIR"
+  echo
+  if [ "$fail" = 0 ]; then
+    echo -e "${C_G}══ SEMUA KOMPONEN SIAP (Termux native) ══${C_R}"
+    echo -e "  Jalankan:  ${C_Y}aio${C_R}   (atau: cd $RELEASE_DIR && ./aio-mod)"
+  else
+    echo -e "${C_E}══ ADA YANG GAGAL ══${C_R}"; return 1
+  fi
+}
+
+do_revert() {
+  say "Revert"
+  for base in Crypto Cryptodome; do
+    local f="$SP/$base/Signature/eddsa.py"
+    [ -e "$f.asli" ] && { mv "$f.asli" "$f"; ok "  restore $base"; }
+  done
+  [ -e "$SP/sitecustomize.py.asli" ] && { mv "$SP/sitecustomize.py.asli" "$SP/sitecustomize.py"; ok "  restore sitecustomize"; }
+  pkill -f "$RUN_DIR/fakelicstls.py" 2>/dev/null || true
+  rm -f "$PREFIX/bin/aio" "$RUN_DIR/fakelicstls.py"
+  ok "  revert selesai"
+}
+
+case "${1:-install}" in
+  install|"")
+    echo -e "${C_C}╔══════════════════════════════════════════════╗"
+    echo -e "║  AIO-MOD PATCHER — Termux Native (aarch64)   ║"
+    echo -e "╚══════════════════════════════════════════════╝${C_R}"
+    patch_eddsa
+    patch_sitecustomize
+    patch_sentinel
+    patch_dns
+    patch_server
+    patch_runner
+    do_verify
+    ;;
+  verify) do_verify ;;
+  revert) do_revert ;;
+  *) echo "usage: $0 [install|verify|revert]"; exit 1 ;;
+esac

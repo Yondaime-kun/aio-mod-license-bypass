@@ -1,0 +1,59 @@
+# ─── Binary & artefak besar (JANGAN pernah di-commit) ────────────────────────
+# Engine aio-mod asli ~27MB (release 3.5). Ambil sendiri dari:
+#   https://github.com/willstore69/toolkit  (release "3.5")
+aio-mod
+aio-mod.asli.bak
+*.bin
+*.bin.gz
+release/
+dist/
+build/
+
+# Dump memori / analisis RE (bisa ratusan MB - GB)
+*.dump
+mem*.bin
+engine*.bin
+*_strings.txt
+dump*.json
+memdump*.py
+*dumpindex*.json
+
+# Arsip & ekstraksi
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+*.7z
+*.deb
+*.apk
+*.xapk
+*.apkm
+*.apks
+
+# ─── Kredensial (JANGAN pernah di-commit) ────────────────────────────────────
+.github_token
+*token*
+*.pem
+*.key
+!patcher/certs/*.pem
+!patcher/certs/*.key
+
+# ─── Backup lokal file yang di-patch ─────────────────────────────────────────
+*.asli
+*.orig
+*.bak
+*.backup
+__pycache__/
+*.pyc
+
+# ─── Runtime / log / state ───────────────────────────────────────────────────
+*.log
+*.pyc
+.DS_Store
+Thumbs.db
+
+# ─── vscode / editor ─────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+_engine_bin/
