@@ -15,7 +15,7 @@ HWID ke server asli.
 
 | Platform | Versi | Status | Cara redirect |
 |---|---|---|---|
-| **Linux x86_64 (Ubuntu 22.04, kernel 6.8)** | — | ✅ **VIP terverifikasi** | `/etc/hosts` + `fakelics.service` (systemd) + qemu-aarch64 |
+| **Linux x86_64 (Ubuntu 24.04.5 LTS, kernel 6.8.0-101)** | — | ✅ **VIP terverifikasi** | `/etc/hosts` + `fakelics.service` (systemd) + qemu-aarch64 |
 | **Termux aarch64 (Android)** | Python 3.14 | ⚠️ **belum VIP** — lagi dibenerin | shim `sitecustomize` (non-root) |
 
 > Di Termux, fake server **harus** jalan pakai Python bernacl
