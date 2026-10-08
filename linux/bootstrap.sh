@@ -34,6 +34,7 @@ LIBPY_URL="https://github.com/Yondaime-kun/aio-mod-license-bypass/releases/downl
 LIBPY_MD5="778aec5978a4f2b47b2fc6f81ad2262f"
 LIBAS_URL="https://github.com/Yondaime-kun/aio-mod-license-bypass/releases/download/engine-v3.5.2/libandroid-support.so"
 LIBAS_MD5="1506571136dcb594e28db729e9c9f4e1"
+BIONIC_URL="https://github.com/Yondaime-kun/aio-mod-license-bypass/releases/download/engine-v3.5.2/bionic-libs.tar.gz"
 # dipertahankan utk referensi (launcher upstream, tidak dipakai)
 ENGINE_URL="https://github.com/willstore69/toolkit/releases/download/3.5/aio-mod"
 
@@ -240,12 +241,29 @@ step_bionic() {
       warn "  $name gagal diunduh"
     fi
   done
-  # lib lain dari .deb Termux (opsional, engine cari sebagian di /system/lib64)
+  # lib lain dari .deb Termux (opsional)
   local src="$TERMUX_USR/lib"
   if [ -d "$src" ]; then
     for lib in libc.so libm.so libz.so libffi.so libsodium.so; do
       [ -e "$src/$lib" ] && [ ! -e "$SYS64/$lib" ] && cp -a "$src/$lib" "$SYS64/" 2>/dev/null || true
     done
+  fi
+
+  # BIONIC: engine ELF nya PT_INTERP = /system/bin/linker64 (WAJIB ada, kalau
+  # tidak qemu-aarch64-static gagal "Could not open '/system/bin/linker64'").
+  # linker64 + libc bionic tidak ada di .deb Termux biasa -> ambil dari release.
+  if [ ! -s /system/bin/linker64 ]; then
+    local bl="$WORKDIR/bionic-libs.tar.gz"
+    say "  download bionic libs (linker64 + libc)"
+    if curl -fL --retry 3 --connect-timeout 15 --max-time 240 -o "$bl" "$BIONIC_URL"; then
+      mkdir -p /system/bin "$SYS64"
+      tar -xzf "$bl" -C / 2>/dev/null && chmod 755 /system/bin/linker64 2>/dev/null || true
+      [ -s /system/bin/linker64 ] && ok "  /system/bin/linker64 siap" || warn "  linker64 gagal extract"
+    else
+      warn "  bionic libs gagal diunduh — engine tak akan jalan"
+    fi
+  else
+    ok "  /system/bin/linker64 sudah ada"
   fi
   [ -s "$SYS64/libpython$PY_MAJOR.so" ] \
     && ok "  libpython$PY_MAJOR tersedia" \
