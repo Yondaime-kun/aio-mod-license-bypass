@@ -352,17 +352,19 @@ step_emu_shims() {
     local mach="${hdr:36:2}"; [ "$mach" = "b7" ] || { skip=$((skip+1)); continue; }
     # sudah shim? (cek shebang)
     head -c2 "$realf" 2>/dev/null | grep -q '#!' && continue
-    mv -f "$realf" "$f.aarch64.bin" 2>/dev/null || continue
-    [ "$realf" != "$f" ] && rm -f "$f" 2>/dev/null || true
-    cat > "$f" <<EOF
+    mv -f "$realf" "$realf.aarch64.bin" 2>/dev/null || continue
+    # shim ditaruh di lokasi ASLI (target symlink), bukan menimpa symlink —
+    # supaya nama alias (clang, clang++, ...) tetap menunjuk ke shim & tak hilang.
+    cat > "$realf" <<EOF
 #!/usr/bin/env bash
 export TERMUX_PREFIX="$TERMUX_USR"
 export PREFIX="$TERMUX_USR"
 export HOME="$TERMUX_HOME"
 export LD_LIBRARY_PATH="$SYS64:$TERMUX_USR/lib"
-exec "$qemu" "$f.aarch64.bin" "\$@"
+exec "$qemu" "$realf.aarch64.bin" "\$@"
 EOF
-    chmod 755 "$f"
+    chmod 755 "$realf"
+    # kalau $f symlink yang menunjuk realf, symlink tetap valid (tak diubah).
     made=$((made+1))
   done
   ok "  $made binary dibungkus qemu ($skip non-aarch64 dilewati)"
