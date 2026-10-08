@@ -180,7 +180,8 @@ step_deps() {
            libcompiler-rt make cmake libc++ ndk-multilib \
            ndk-multilib-native-static ndk-multilib-native-stubs ndk-sysroot \
            aapt2 apksigner apktool d8 dx ecj \
-           libandroid-shmem libiconv libandroid-execinfo libandroid-spawn; do
+           libandroid-shmem libiconv libandroid-execinfo libandroid-spawn \
+           radare2 nodejs; do
     deb_fetch_extract "$p" || true
   done
   mkdir -p "$TERMUX_USR/bin"
@@ -202,7 +203,8 @@ step_deps() {
   say "  4b. paket pure-python (pip wheel)"
   local wheeldir="$WORKDIR/wheels"
   mkdir -p "$wheeldir"
-  local pure="certifi requests urllib3 idna charset-normalizer tqdm colorama packaging"
+  local pure="certifi requests urllib3 idna charset-normalizer tqdm colorama packaging \
+    r2pipe 'protobuf<4' gpapi hermes_dec hbctool pycryptodome pynacl frida frida-tools"
   local have
   have=$(ls "$SPT" 2>/dev/null | tr 'A-Z' 'a-z')
   local missing=""
