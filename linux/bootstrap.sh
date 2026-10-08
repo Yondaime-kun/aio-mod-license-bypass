@@ -227,7 +227,11 @@ step_deps() {
       # PER-PAKET: satu paket tanpa wheel (mis. frida) tak boleh menggagalkan semua.
       local one
       for one in $missing; do
-        timeout 120 "$PYH" -m pip download --no-deps --only-binary=:all: --dest "$wheeldir" "$one" >/dev/null 2>&1 \
+        # protobuf: paksa wheel pure-python (abi none) supaya cocok python 3.14 aarch64
+        timeout 120 "$PYH" -m pip download --no-deps --only-binary=:all: \
+            --platform any --python-version 3.11 --implementation py \
+            --dest "$wheeldir" "$one" >/dev/null 2>&1 \
+          || timeout 120 "$PYH" -m pip download --no-deps --only-binary=:all: --dest "$wheeldir" "$one" >/dev/null 2>&1 \
           || timeout 120 "$PYH" -m pip download --no-deps --dest "$wheeldir" "$one" >/dev/null 2>&1 \
           || warn "  paket opsional dilewati: $one"
       done
