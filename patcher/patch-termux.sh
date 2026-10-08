@@ -134,22 +134,26 @@ patch_sentinel() {
 }
 
 # =============================================================================
-# STEP 4 — Redirect DNS (butuh root; di Termux non-root -> pakai alternatif)
+# STEP 4 — Redirect DNS (Termux non-root: TIDAK bisa tulis /etc/hosts)
 # =============================================================================
 patch_dns() {
-  say "Step 4/6  Redirect DNS $LICENSE_HOST -> 127.0.0.1"
+  say "Step 4/6  Redirect DNS $LICENSE_HOST"
+  # Termux non-root TIDAK bisa menulis /etc/hosts (system file Android).
+  # Solusinya: pasang shim DNS lokal lewat resolv/route engine sendiri.
   if [ -w /etc/hosts ] 2>/dev/null; then
-    grep -q "$LICENSE_HOST" /etc/hosts || echo "127.0.0.1 $LICENSE_HOST" >> /etc/hosts
-    ok "  /etc/hosts diupdate"
-  elif command -v su >/dev/null 2>&1 && su -c "true" 2>/dev/null; then
-    su -c "grep -q '$LICENSE_HOST' /etc/hosts || echo '127.0.0.1 $LICENSE_HOST' >> /etc/hosts"
-    ok "  /etc/hosts diupdate (via su)"
+    # Kasus langka: HP rooted & /etc/hosts writable
+    grep -q "$LICENSE_HOST" /etc/hosts 2>/dev/null \
+      || echo "127.0.0.1 $LICENSE_HOST" >> /etc/hosts
+    ok "  /etc/hosts diupdate (root tersedia)"
   else
-    warn "  /etc/hosts tak bisa ditulis (non-root)."
-    warn "  ALTERNATIF: engine akan tetap coba resolve; karena fake server"
-    warn "  listen di 127.0.0.1:8443 dan tidak ada jalur DoH yg sukses ke"
-    warn "  server asli saat di mobil, bypass TETAP jalan krn verifier sudah"
-    warn "  di-patch. hosts hanya mempercepat/merapikan."
+    # Non-root: pakai shim getaddrinfo/socket di sitecustomize (lihat catatan)
+    ok "  non-root: /etc/hosts dilewati (normal di Termux)"
+    if [ -f "$SP/sitecustomize.py" ] && grep -q "_dns_redirect" "$SP/sitecustomize.py" 2>/dev/null; then
+      ok "  DNS redirect aktif via sitecustomize (localhost shim)"
+    else
+      warn "  DNS redirect via sitecustomize belum terpasang"
+      warn "  (tidak wajib: fake verifier sudah bikin bypass jalan tanpa server)"
+    fi
   fi
 }
 

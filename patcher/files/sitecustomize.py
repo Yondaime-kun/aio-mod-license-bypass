@@ -16,8 +16,39 @@ Fail-open: any error -> original write is used.
 import os as _os
 import re as _re
 
-_os.getuid = lambda: 2000
-_os.geteuid = lambda: 2000
+try:
+    _os.getuid = lambda: 2000
+    _os.geteuid = lambda: 2000
+except Exception:
+    pass
+
+# ─── DNS redirect (Termux non-root, tanpa /etc/hosts) ────────────────────────
+# Arahkan hostname license ke 127.0.0.1 supaya koneksi engine ditangkap fake
+# server lokal. Non-root tak bisa menulis /etc/hosts, jadi kita shim di layer
+# Python: socket.getaddrinfo / create_connection.
+_dns_redirect = {
+    'aio.scwill.store': '127.0.0.1',
+}
+
+
+def _install_dns_redirect():
+    try:
+        import socket as _s
+        _orig_gai = _s.getaddrinfo
+
+        def _gai(host, *args, **kwargs):
+            tgt = _dns_redirect.get(host)
+            if tgt:
+                return _orig_gai(tgt, *args, **kwargs)
+            return _orig_gai(host, *args, **kwargs)
+
+        _s.getaddrinfo = _gai
+    except Exception:
+        pass
+
+
+_install_dns_redirect()
+# ─────────────────────────────────────────────────────────────────────────────
 
 _ANSI = _re.compile(r'\x1b\[[0-9;]*m')
 _BLOCK = ('\u2588', '\u2591')

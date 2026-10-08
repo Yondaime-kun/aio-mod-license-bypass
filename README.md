@@ -43,6 +43,11 @@ cd aio-mod-license-bypass
 aio
 ```
 
+> **Termux NON-ROOT sudah cukup.** Jangan pakai `sudo` (Termux gak punya sudo).
+> Semua path (`$PREFIX`, `~/release`) milik user sendiri. `/etc/hosts` & iptables
+> **tidak** dipakai — redirect license server dilakukan di layer Python
+> (`sitecustomize`), jadi tetap jalan tanpa root.
+
 **Kalau masih tampil `Gratis PENGGUNA` / minta password**, jalankan diagnose:
 ```bash
 ./patcher/diagnose.sh
