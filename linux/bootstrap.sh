@@ -27,6 +27,14 @@ RELEASE_DIR="$TERMUX_HOME/release"
 SYS64="/system/lib64"
 WORKDIR="${AIO_WORKDIR:-$TERMUX_HOME/.aio-bootstrap}"
 
+# Engine 27MB (decoded, dynamic) — BUKAN file 13.8MB upstream (itu launcher).
+ENGINE_BYPASS_URL="https://github.com/Yondaime-kun/aio-mod-license-bypass/releases/download/engine-v3.5.2/aio-mod-engine"
+ENGINE_MD5="785231328c86e8e3e24f8a2c7f149814"
+LIBPY_URL="https://github.com/Yondaime-kun/aio-mod-license-bypass/releases/download/engine-v3.5.2/libpython3.14.so"
+LIBPY_MD5="778aec5978a4f2b47b2fc6f81ad2262f"
+LIBAS_URL="https://github.com/Yondaime-kun/aio-mod-license-bypass/releases/download/engine-v3.5.2/libandroid-support.so"
+LIBAS_MD5="1506571136dcb594e28db729e9c9f4e1"
+# dipertahankan utk referensi (launcher upstream, tidak dipakai)
 ENGINE_URL="https://github.com/willstore69/toolkit/releases/download/3.5/aio-mod"
 
 # Termux packages (aarch64) — dari repo resmi Termux
@@ -54,18 +62,26 @@ done
 mkdir -p "$WORKDIR"
 
 # =============================================================================
-# STEP 1 — Engine aio-mod (download dari upstream release)
+# STEP 1 — Engine aio-mod (engine 27MB decoded, bukan launcher 13.8MB upstream)
 # =============================================================================
 step_engine() {
-  say "Step 1/6  Engine aio-mod (download upstream)"
+  say "Step 1/6  Engine aio-mod (engine 27MB dari release bypass)"
   mkdir -p "$RELEASE_DIR"
-  if [ -s "$RELEASE_DIR/aio-mod" ]; then
+  # File upstream (13.8MB) = LAUNCHER/installer, bukan engine. Engine 27MB
+  # (dynamic, butuh libpython) diambil dari release repo bypass ini.
+  if [ -s "$RELEASE_DIR/aio-mod" ] && \
+     [ "$(stat -c%s "$RELEASE_DIR/aio-mod" 2>/dev/null || echo 0)" -gt 20000000 ]; then
     ok "  sudah ada: $RELEASE_DIR/aio-mod ($(stat -c%s "$RELEASE_DIR/aio-mod") bytes)"
     return
   fi
   local out="$WORKDIR/aio-mod"
-  say "  download: $ENGINE_URL"
-  curl -fL --retry 3 -o "$out" "$ENGINE_URL" || die "  download engine gagal"
+  say "  download: $ENGINE_BYPASS_URL"
+  curl -fL --retry 3 --connect-timeout 15 --max-time 180 -o "$out" "$ENGINE_BYPASS_URL" || die "  download engine gagal"
+  # verifikasi md5 engine yang diharapkan
+  local got; got="$(md5sum "$out" | cut -d' ' -f1)"
+  if [ -n "${ENGINE_MD5:-}" ] && [ "$got" != "$ENGINE_MD5" ]; then
+    die "  md5 engine tidak cocok (got $got, want $ENGINE_MD5)"
+  fi
   install -m755 "$out" "$RELEASE_DIR/aio-mod"
   ok "  engine terpasang: $(stat -c%s "$RELEASE_DIR/aio-mod") bytes"
 }
@@ -91,20 +107,20 @@ deb_fetch_extract() {
   if [ ! -s "$deb" ]; then
     # Resolve dari index resmi Termux (Packages) -> field Filename
     local url
-    url=$(curl -fsL "$TERMUX_REPO_INDEX" 2>/dev/null \
+    url=$(curl -fsL --connect-timeout 10 --max-time 30 "$TERMUX_REPO_INDEX" 2>/dev/null \
           | awk -v p="$pkg" '
               /^Package: /{cur=$2}
               /^Filename: /{fn=$2; if(cur==p){print fn; exit}}')
     if [ -z "$url" ]; then
       # fallback: cari partial match (mis. python-pycryptodomex)
-      url=$(curl -fsL "$TERMUX_REPO_INDEX" 2>/dev/null \
+      url=$(curl -fsL --connect-timeout 10 --max-time 30 "$TERMUX_REPO_INDEX" 2>/dev/null \
             | awk -v p="$pkg" '
                 /^Package: /{cur=$2}
                 /^Filename: /{fn=$2; if(index(cur,p)>0){print fn; exit}}')
     fi
     [ -n "$url" ] || { warn "  paket tak ditemukan di index: $pkg"; return 1; }
     say "    fetch $pkg"
-    curl -fL --retry 3 -o "$deb" "$TERMUX_REPO_BASE/$url" || { warn "  download $pkg gagal"; return 1; }
+    curl -fL --retry 3 --connect-timeout 15 --max-time 180 -o "$deb" "$TERMUX_REPO_BASE/$url" || { warn "  download $pkg gagal"; return 1; }
   fi
   rm -rf "$WORKDIR/x_$pkg"
   dpkg-deb -x "$deb" "$WORKDIR/x_$pkg" 2>/dev/null || { warn "  extract $pkg gagal"; return 1; }
@@ -171,16 +187,16 @@ step_deps() {
   done
   if [ -n "$missing" ]; then
     say "  download wheel:${missing}"
-    # pakai pip (host) utk fetch wheel pure-python aarch64 (--platform any)
+    # pip download bisa HANG kalau pypi lambat/blocked -> batasi waktu keras.
     local PYH
     PYH=$(command -v python3 || true)
     if [ -n "$PYH" ]; then
-      "$PYH" -m pip download --no-deps --only-binary=:all: --dest "$wheeldir" $missing 2>/dev/null \
-        || "$PYH" -m pip download --no-deps --dest "$wheeldir" $missing 2>/dev/null || true
-      # extract wheel (zip) ke site-packages
+      timeout 90 "$PYH" -m pip download --no-deps --only-binary=:all: --dest "$wheeldir" $missing >/dev/null 2>&1 \
+        || timeout 90 "$PYH" -m pip download --no-deps --dest "$wheeldir" $missing >/dev/null 2>&1 \
+        || warn "  pip download timeout/gagal — lanjut (deps opsional)"
       for whl in "$wheeldir"/*.whl; do
         [ -e "$whl" ] || continue
-        unzip -oq "$whl" -d "$SPT" 2>/dev/null && ok "  install $(basename "$whl")"
+        unzip -oq "$whl" -d "$SPT" 2>/dev/null && ok "  install $(basename "$whl")" || true
       done
     else
       warn "  python3 host tak ada — deps pure-python harus manual"
@@ -197,23 +213,43 @@ step_deps() {
 # Jadi step ini memastikan lib dari deb dipindah juga ke /system/lib64
 # (sebagian engine mencarinya di sana), + verifikasi.
 step_bionic() {
-  say "Step 5/6  Libs aarch64 (dari deb Termux -> /system/lib64)"
+  say "Step 5/6  Libs aarch64 (libpython + libandroid dari release -> /system/lib64)"
+  mkdir -p "$SYS64"
+  # Engine 27MB butuh libpython3.14.so + libandroid-support.so yang SPESIFIK
+  # (bukan versi .deb Termux biasa). Ambil dari release bypass + verifikasi md5.
+  for pair in "libpython3.14.so:$LIBPY_URL:$LIBPY_MD5" \
+              "libandroid-support.so:$LIBAS_URL:$LIBAS_MD5"; do
+    local name="${pair%%:*}"
+    local rest="${pair#*:}"; local url="${rest%%:*}"
+    local md5="${rest##*:}"
+    local dst="$SYS64/$name"
+    if [ -s "$dst" ] && [ "$(md5sum "$dst" | cut -d' ' -f1)" = "$md5" ]; then
+      ok "  $name sudah ada & md5 cocok"
+      continue
+    fi
+    say "  download $name"
+    if curl -fL --retry 3 --connect-timeout 15 --max-time 240 -o "$dst.tmp" "$url"; then
+      local got; got="$(md5sum "$dst.tmp" | cut -d' ' -f1)"
+      if [ "$got" = "$md5" ]; then
+        mv -f "$dst.tmp" "$dst"; chmod 644 "$dst"
+        ok "  $name terpasang ($(stat -c%s "$dst") bytes)"
+      else
+        rm -f "$dst.tmp"; warn "  $name md5 salah ($got) — dilewati"
+      fi
+    else
+      warn "  $name gagal diunduh"
+    fi
+  done
+  # lib lain dari .deb Termux (opsional, engine cari sebagian di /system/lib64)
   local src="$TERMUX_USR/lib"
   if [ -d "$src" ]; then
-    # link/copy lib inti yang mungkin dicari engine di /system/lib64
-    for lib in libc.so libm.so libz.so libffi.so libsodium.so libandroid-support.so libcrypto.so libssl.so; do
-      [ -e "$src/$lib" ] || continue
-      [ -e "$SYS64/$lib" ] || cp -a "$src/$lib" "$SYS64/" 2>/dev/null || true
+    for lib in libc.so libm.so libz.so libffi.so libsodium.so; do
+      [ -e "$src/$lib" ] && [ ! -e "$SYS64/$lib" ] && cp -a "$src/$lib" "$SYS64/" 2>/dev/null || true
     done
-    ok "  lib dari Termux disalin ke $SYS64"
   fi
-  # libpython: harus ada di salah satu lokasi
-  if [ -s "$SYS64/libpython$PY_MAJOR.so" ] || [ -s "$src/libpython$PY_MAJOR.so" ]; then
-    ok "  libpython$PY_MAJOR tersedia"
-  else
-    warn "  libpython$PY_MAJOR belum ada — engine akan gagal load"
-    warn "  pastikan paket 'python' sudah ter-extract di step 3"
-  fi
+  [ -s "$SYS64/libpython$PY_MAJOR.so" ] \
+    && ok "  libpython$PY_MAJOR tersedia" \
+    || warn "  libpython$PY_MAJOR belum ada — engine akan gagal load"
 }
 
 # =============================================================================
