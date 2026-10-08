@@ -29,27 +29,43 @@ Detail lengkap ada di **[WALKTHROUGH.md](WALKTHROUGH.md)**.
 
 ---
 
-## Cara pakai
+## Cara pakai — FULL AUTO (engine di-download otomatis)
+
+**Tidak perlu download apa pun manual.** Bootstrap mengunduh engine + runtime
+sendiri.
 
 ### Di Termux (aarch64 native) — paling gampang
 ```bash
-pkg install python python-pycryptodomex python-pynacl git
-git clone <repo-url> aio-mod-re && cd aio-mod-re
-# letakkan engine aio-mod + folder release/ di ~/release/ (ambil sendiri dari upstream)
-./patcher/patch-termux.sh install
+pkg install git
+git clone https://github.com/Yondaime-kun/aio-mod-license-bypass.git
+cd aio-mod-license-bypass
+./patcher/bootstrap-termux.sh    # install paket + download engine + bypass
 aio
 ```
 
 ### Di Linux x86_64 (via qemu-aarch64-static)
 ```bash
-sudo ./patcher/patch.sh install
+sudo apt install qemu-user-static binutils curl unzip
+git clone https://github.com/Yondaime-kun/aio-mod-license-bypass.git
+cd aio-mod-license-bypass
+sudo ./patcher/bootstrap.sh      # download engine + Termux .deb + deps + bypass
 sudo aio
 ```
 
+**Apa yang di-download bootstrap:**
+- Engine `aio-mod` dari GitHub release upstream (`willstore69/toolkit` @ 3.5)
+- Runtime Python 3.14 + deps (`.deb` dari repo resmi Termux)
+- Wheel pure-python (certifi/requests/tqdm/...) via pip
+- Bypass license diterapkan otomatis (memanggil `patch.sh`)
+
+> Kalau mau pakai engine yang sudah ada (taruh sendiri di `~/release/aio-mod`),
+> bootstrap akan mendeteksi & melewati langkah download.
+
 ### Perintah umum
 ```bash
-./patcher/patch.sh verify     # cek status semua komponen
+./patcher/patch.sh verify     # cek status semua komponen (VPS)
 ./patcher/patch.sh revert     # kembalikan ke kondisi asli
+./patcher/patch-termux.sh verify   # versi Termux
 ```
 
 Patcher bersifat **idempotent** — aman dijalankan berulang. Setiap file yang
@@ -61,8 +77,10 @@ di-patch di-backup `.asli` sebelum ditimpa.
 
 ```
 patcher/
-├── patch.sh          # patcher Linux/x86 (qemu + systemd)
-├── patch-termux.sh   # patcher Termux native (aarch64, tanpa qemu)
+├── bootstrap.sh          # ★ FULL AUTO: download engine + runtime + bypass (x86)
+├── bootstrap-termux.sh   # ★ FULL AUTO (Termux native)
+├── patch.sh              # patcher Linux/x86 (qemu + systemd)
+├── patch-termux.sh       # patcher Termux native (aarch64, tanpa qemu)
 ├── files/
 │   ├── eddsa_fake.py     # verifier Ed25519 palsu (inti bypass)
 │   ├── fakelicstls.py    # fake license TLS server
@@ -75,7 +93,8 @@ patcher/
 ```
 
 **Tidak disertakan** (lihat `.gitignore`): engine `aio-mod` (~27 MB) dan semua
-dump memori/artefak RE. Ambil engine aslinya sendiri dari upstream.
+dump memori/artefak RE — tapi **`bootstrap.sh` mengunduhnya otomatis**, jadi
+kamu tetap tak perlu ambil manual.
 
 ---
 
