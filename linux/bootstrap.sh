@@ -127,7 +127,13 @@ deb_fetch_extract() {
   dpkg-deb -x "$deb" "$WORKDIR/x_$pkg" 2>/dev/null || { warn "  extract $pkg gagal"; return 1; }
   # copy isi data/data/com.termux/files/usr/* -> dest
   if [ -d "$WORKDIR/x_$pkg/data/data/com.termux/files/usr" ]; then
-    cp -a "$WORKDIR/x_$pkg/data/data/com.termux/files/usr/." "$dest/" 2>/dev/null || true
+    # pastikan dest writable (bootstrap buat sbg root, bisa 700 root-only) —
+    # tanpa ini cp gagal diam-diam & paket "terpasang" padahal kosong.
+    chmod 755 "$dest" 2>/dev/null || true
+    [ -d "$dest/bin" ] && chmod 755 "$dest/bin" 2>/dev/null || true
+    [ -d "$dest/lib" ] && chmod 755 "$dest/lib" 2>/dev/null || true
+    cp -a "$WORKDIR/x_$pkg/data/data/com.termux/files/usr/." "$dest/" \
+      || warn "  copy $pkg -> $dest gagal (izin?)"
   fi
   return 0
 }
