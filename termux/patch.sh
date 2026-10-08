@@ -254,16 +254,20 @@ patch_engine() {
     fi
   fi
   [ -s "$lib" ] && ok "  libpython3.14.so siap ($(stat -c%s "$lib" 2>/dev/null || echo ?) bytes)"
-  # Launcher asli (13.8MB) tetap dipasang; engine 27MB disebar ke lokasi yg
-  # dicari runner + $RELEASE_DIR supaya konsisten dgn yg dipindai Nuitka.
-  install -m755 "$eng" "$RELEASE_DIR/aio-mod-engine" 2>/dev/null || true
-  install -m755 "$eng" "$RELEASE_DIR/aio-mod" 2>/dev/null || true
+  # Engine 27MB disebar ke $RELEASE_DIR (yg dipindai Nuitka) + dipakai runner.
+  # rm dulu: 'install' bisa gagal menimpa file executable yg sedang dipakai.
+  local rdst="$RELEASE_DIR/aio-mod"
+  rm -f "$rdst" "$rdst.engine" 2>/dev/null || true
+  cp -f "$eng" "$RELEASE_DIR/aio-mod-engine" 2>/dev/null || true
+  cp -f "$eng" "$rdst" 2>/dev/null || true
+  chmod 755 "$rdst" "$RELEASE_DIR/aio-mod-engine" 2>/dev/null || true
   ok "  engine terpasang: $eng ($(stat -c%s "$eng" 2>/dev/null || echo '?') bytes)"
-  # python shared lib utk engine dynamic (dari paket Termux)
-  if ! ls "$RELEASE_DIR"/libpython3.14.so >/dev/null 2>&1; then
-    for so in "$PREFIX/lib/libpython3.14.so"; do
-      [ -e "$so" ] && { install -m644 "$so" "$RELEASE_DIR/libpython3.14.so" 2>/dev/null || true; ok "  libpython3.14.so disalin"; }
-    done
+  # python shared lib utk engine dynamic: VERSI KHUSUS dari release (bukan
+  # libpython Termux biasa). Taruh di ENGINE_DIR + RELEASE_DIR.
+  local libsrc="$ENGINE_DIR/libpython3.14.so"
+  if [ -s "$libsrc" ]; then
+    cp -f "$libsrc" "$RELEASE_DIR/libpython3.14.so" 2>/dev/null || true
+    ok "  libpython3.14.so -> $RELEASE_DIR"
   fi
 }
 
