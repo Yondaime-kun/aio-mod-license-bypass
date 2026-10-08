@@ -175,20 +175,41 @@ patch_server() {
   "$PY" -c 'import nacl' 2>/dev/null \
     && ok "  server python: $PY (pynacl)" \
     || warn "  server python: $PY (TANPA pynacl — ed25519_sig dummy)"
-  # tulis service dgn path absolut yg benar
-  sed -e "s|/tmp/fakelicstls.py|/opt/aio-patcher/fakelicstls.py|" \
-      -e "s|/tmp/lc2.pem|/opt/aio-patcher/lc2.pem|" \
-      -e "s|/tmp/leaf.key|/opt/aio-patcher/leaf.key|" \
-      -e "s|^ExecStart=.*|ExecStart=$PY /opt/aio-patcher/fakelicstls.py|" \
-      -e "s|/tmp/fakelics.log|/var/log/aio-fakelics.log|" \
-      "$FILES/fakelics.service" > /etc/systemd/system/fakelics.service
-  systemctl daemon-reload
-  systemctl enable fakelics.service >/dev/null 2>&1 || true
-  systemctl restart fakelics.service
+  # Jalankan server. systemd kalau ada; kalau tidak (container/VPS tanpa PID1
+  # systemd), fallback nohup — sama seperti patcher Termux.
+  local HAS_SYSTEMD=0
+  if command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ]; then
+    HAS_SYSTEMD=1
+  fi
+  if [ "$HAS_SYSTEMD" = "1" ]; then
+    # tulis service dgn path absolut yg benar
+    sed -e "s|/tmp/fakelicstls.py|/opt/aio-patcher/fakelicstls.py|" \
+        -e "s|/tmp/lc2.pem|/opt/aio-patcher/lc2.pem|" \
+        -e "s|/tmp/leaf.key|/opt/aio-patcher/leaf.key|" \
+        -e "s|^ExecStart=.*|ExecStart=$PY /opt/aio-patcher/fakelicstls.py|" \
+        -e "s|/tmp/fakelics.log|/var/log/aio-fakelics.log|" \
+        "$FILES/fakelics.service" > /etc/systemd/system/fakelics.service
+    systemctl daemon-reload 2>/dev/null || true
+    systemctl enable fakelics.service >/dev/null 2>&1 || true
+    systemctl restart fakelics.service 2>/dev/null || true
+    sleep 2
+    if systemctl is-active --quiet fakelics.service 2>/dev/null; then
+      ok "  fakelics.service aktif (pid $(systemctl show -p MainPID --value fakelics.service 2>/dev/null))"
+      return 0
+    fi
+    warn "  systemd gagal — fallback ke nohup"
+  fi
+  # fallback nohup (container tanpa systemd)
+  pkill -9 -f "aio-patcher/fakelicstls.py" 2>/dev/null || true
+  sleep 1
+  setsid nohup "$PY" /opt/aio-patcher/fakelicstls.py \
+    >> /var/log/aio-fakelics.log 2>&1 < /dev/null &
   sleep 2
-  systemctl is-active --quiet fakelics.service \
-    && ok "  fakelics.service aktif (pid $(systemctl show -p MainPID --value fakelics.service))" \
-    || die "  fakelics.service gagal start — cek: journalctl -u fakelics"
+  if pgrep -f "aio-patcher/fakelicstls.py" >/dev/null 2>&1; then
+    ok "  fake server jalan via nohup (pid $(pgrep -f 'aio-patcher/fakelicstls.py' | head -1))"
+  else
+    die "  fake server gagal start — cek /var/log/aio-fakelics.log"
+  fi
 }
 
 # =============================================================================

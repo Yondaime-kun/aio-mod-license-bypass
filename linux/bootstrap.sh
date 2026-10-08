@@ -163,7 +163,7 @@ step_deps() {
   have=$(ls "$SPT" 2>/dev/null | tr 'A-Z' 'a-z')
   local missing=""
   for p in $pure; do
-    if echo "$have" | grep -qi "$(echo "$p" | tr -d '-_')"; then
+    if echo "$have" | grep -qi "$(echo "$p" | tr -d -- '-_')"; then
       ok "  ada: $p"
     else
       missing="$missing $p"
