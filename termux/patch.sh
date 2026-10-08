@@ -254,6 +254,20 @@ patch_engine() {
     fi
   fi
   [ -s "$lib" ] && ok "  libpython3.14.so siap ($(stat -c%s "$lib" 2>/dev/null || echo ?) bytes)"
+  # libandroid-support.so: libpython3.14.so (aarch64 Termux build) LINK ke ini;
+  # tanpa dia libpython gagal load -> engine ambil jalur berbeda -> "Tanda
+  # tangan respons server tidak valid". WAJIB, walau cuma 20KB.
+  local libas="$ENGINE_DIR/libandroid-support.so"
+  local libas_url="https://github.com/Yondaime-kun/aio-mod-license-bypass/releases/download/engine-v3.5.2/libandroid-support.so"
+  if [ ! -s "$libas" ]; then
+    dl "$libas_url" "$libas" 2>/dev/null || true
+  fi
+  if [ -s "$libas" ]; then
+    cp -f "$libas" "$RELEASE_DIR/libandroid-support.so" 2>/dev/null || true
+    ok "  libandroid-support.so siap ($(stat -c%s "$libas" 2>/dev/null) bytes)"
+  else
+    warn "  libandroid-support.so GAGAL diunduh (engine mungkin pakai jalur beda)"
+  fi
   # Engine 27MB disebar ke $RELEASE_DIR (yg dipindai Nuitka) + dipakai runner.
   # rm dulu: 'install' bisa gagal menimpa file executable yg sedang dipakai.
   local rdst="$RELEASE_DIR/aio-mod"
