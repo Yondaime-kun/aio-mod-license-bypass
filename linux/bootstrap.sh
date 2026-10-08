@@ -173,7 +173,8 @@ step_deps() {
   for p in openjdk-21 openjdk-17 zip 7zip aapt android-tools clang lld llvm \
            libcompiler-rt make cmake libc++ ndk-multilib \
            ndk-multilib-native-static ndk-multilib-native-stubs ndk-sysroot \
-           aapt2 apksigner apktool d8 dx ecj; do
+           aapt2 apksigner apktool d8 dx ecj \
+           libandroid-shmem libiconv libandroid-execinfo; do
     deb_fetch_extract "$p" || true
   done
   mkdir -p "$TERMUX_USR/bin"
@@ -184,7 +185,7 @@ step_deps() {
     local jn; jn="$(basename "$jb")"
     [ -e "$TERMUX_USR/bin/$jn" ] || ln -sf "$jb" "$TERMUX_USR/bin/$jn" 2>/dev/null
   done
-  [ -e "$TERMUX_USR/bin/java" ] && ok "  java -> \$(readlink -f "$TERMUX_USR/bin/java")" \
+  [ -e "$TERMUX_USR/bin/java" ] && ok "  java -> $(readlink -f "$TERMUX_USR/bin/java" 2>/dev/null)" \
     || warn "  java tak ditemukan di paket openjdk"
   # alias Cryptodome <- Crypto (pycryptodomex tidak menyediakan alias)
   if [ -d "$SPT/Crypto" ] && [ ! -d "$SPT/Cryptodome" ]; then
@@ -284,11 +285,23 @@ step_emu_shims() {
   local bindir="$TERMUX_USR/bin"
   [ -d "$bindir" ] || { warn "  $bindir tak ada — skip"; return 0; }
   local qemu; qemu="$(command -v qemu-aarch64-static || echo /usr/bin/qemu-aarch64-static)"
+  # lib aarch64 (libjvm butuh libandroid-shmem/libiconv/...) harus terlihat
+  # oleh linker bionic -> taruh di /system/lib64 (LD_LIBRARY_PATH shim).
+  local libdir="$TERMUX_USR/lib"
+  if [ -d "$libdir" ]; then
+    local n=0
+    for l in "$libdir"/*.so "$libdir"/*.so.*; do
+      [ -e "$l" ] || continue
+      local lb; lb="$(basename "$l")"
+      [ -e "$SYS64/$lb" ] || { cp -a "$l" "$SYS64/" 2>/dev/null && n=$((n+1)); }
+    done
+    ok "  $n lib aarch64 -> $SYS64"
+  fi
   local made=0 skip=0
   for f in "$bindir"/*; do
     [ -f "$f" ] || continue
     local b; b="$(basename "$f")"
-    case "$b" in *.asli|*.jar|*.zip|*-will|*-real|apt) continue ;; esac
+    case "$b" in *.asli|*.jar|*.zip|*.bin|apt) continue ;; esac
     # identifikasi ELF aarch64 (machine 0xb7) lewat magic header
     local hdr; hdr="$(od -An -tx1 -N20 "$f" 2>/dev/null | tr -d ' \n')"
     case "$hdr" in 7f454c46*) : ;; *) continue ;; esac
@@ -300,6 +313,8 @@ step_emu_shims() {
 #!/usr/bin/env bash
 export TERMUX_PREFIX="$TERMUX_USR"
 export PREFIX="$TERMUX_USR"
+export HOME="$TERMUX_HOME"
+export JAVA_HOME="\$(dirname "\$(dirname "\$(readlink -f "\$0")")")"
 export LD_LIBRARY_PATH="$SYS64:$TERMUX_USR/lib"
 exec "$qemu" "$f.aarch64.bin" "\$@"
 EOF
