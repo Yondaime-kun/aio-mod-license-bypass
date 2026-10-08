@@ -104,7 +104,11 @@ class H(BaseHTTPRequestHandler):
         except Exception:
             body = {}
         hwid = body.get("hwid", "AIO3-UNKNOWN")
-        req_nonce = self.headers.get("X-Req-Nonce", secrets.token_hex(16))
+        # PENTING: engine MEMVERIFIKASI bahwa req_nonce di respons == X-Req-Nonce
+        # yg dia kirim. Kalau header ada tapi kosong (''), dict.get() mengembalikan
+        # '' (bukan default) -> respons req_nonce kosong -> "Tanda tangan tidak
+        # valid". Jadi generate nonce kalau kosong.
+        req_nonce = self.headers.get("X-Req-Nonce") or secrets.token_hex(16)
         # DEBUG: log everything the engine sends so we can match its expectations
         log("POST %s" % self.path)
         log("  headers: %s" % dict(self.headers))
