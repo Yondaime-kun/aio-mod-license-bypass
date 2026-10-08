@@ -47,6 +47,10 @@ die()  { err "$*"; exit 1; }
 # =============================================================================
 patch_eddsa() {
   say "Step 1/7  Fake Ed25519 verifier (Crypto + Cryptodome)"
+  # Alias Crypto -> Cryptodome kalau perlu (paket pycryptodomex cuma punya Cryptodome)
+  if [ ! -d "$SP/Crypto" ] && [ -d "$SP/Cryptodome" ]; then
+    ln -sfn Cryptodome "$SP/Crypto" 2>/dev/null && ok "  alias Crypto -> Cryptodome"
+  fi
   for base in Crypto Cryptodome; do
     local tgt="$SP/$base/Signature/eddsa.py"
     [ -e "$tgt" ] || { warn "  $tgt tidak ada — skip (paket $base belum terpasang?)"; continue; }
@@ -59,20 +63,15 @@ patch_eddsa() {
 }
 
 # =============================================================================
-# STEP 2 — sitecustomize: spoof uid + hook logging
+# STEP 2 — sitecustomize: spoof uid + adaptive progress-bar shrinker
 # =============================================================================
 patch_sitecustomize() {
-  say "Step 2/7  sitecustomize (spoof os.getuid=2000)"
+  say "Step 2/7  sitecustomize (spoof uid + bar shrinker)"
   local tgt="$SP/sitecustomize.py"
   [ -e "$tgt" ] && [ ! -e "$tgt.asli" ] && cp -a "$tgt" "$tgt.asli"
-  cat > "$tgt" <<'PYEOF'
-import os as _os
-# getuid via vDSO = 0 di qemu -> spoof supaya lolos root-check engine
-_os.getuid = lambda: 2000
-_os.geteuid = lambda: 2000
-PYEOF
+  install -m644 "$FILES/sitecustomize.py" "$tgt"
   rm -rf "$SP/__pycache__"
-  ok "  sitecustomize.py terpasang"
+  ok "  sitecustomize.py terpasang (uid spoof + bar adapter)"
 }
 
 # =============================================================================

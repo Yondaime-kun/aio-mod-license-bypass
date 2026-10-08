@@ -59,6 +59,16 @@ esac
 patch_eddsa() {
   say "Step 1/6  Fake Ed25519 verifier (Crypto + Cryptodome)"
   [ -f "$FILES/eddsa_fake.py" ] || die "  eddsa_fake.py tak ada di $FILES"
+
+  # PENTING: paket Termux 'python-pycryptodomex' HANYA menyediakan 'Cryptodome',
+  # sedangkan engine meng-import 'Crypto.Signature.eddsa'. Bikin alias Crypto
+  # -> Cryptodome kalau 'Crypto' belum ada (inilah yg sering bikin Gagal/Gratis).
+  if [ ! -d "$SP/Crypto" ] && [ -d "$SP/Cryptodome" ]; then
+    ln -sfn Cryptodome "$SP/Crypto" 2>/dev/null \
+      && ok "  alias Crypto -> Cryptodome dibuat" \
+      || warn "  gagal bikin alias Crypto -> Cryptodome"
+  fi
+
   local found=0
   for base in Crypto Cryptodome; do
     local tgt="$SP/$base/Signature/eddsa.py"
@@ -69,6 +79,14 @@ patch_eddsa() {
     ok "  $base/Signature/eddsa.py -> fake"
     found=1
   done
+
+  # Verifikasi: engine HARUS bisa `import Crypto.Signature.eddsa`
+  if python3 -c "import Crypto.Signature.eddsa" 2>/dev/null; then
+    ok "  import Crypto.Signature.eddsa OK (engine akan pakai fake)"
+  else
+    warn "  'import Crypto.Signature.eddsa' GAGAL — cek paket pycryptodome(x)"
+  fi
+
   [ "$found" = 1 ] || die "  pycryptodome belum terpasang: pkg install python-pycryptodomex"
 }
 
@@ -77,19 +95,12 @@ patch_eddsa() {
 #          tapi tetap pasang utk konsistensi)
 # =============================================================================
 patch_sitecustomize() {
-  say "Step 2/6  sitecustomize (spoof os.getuid)"
+  say "Step 2/6  sitecustomize (spoof uid + bar shrinker)"
   local tgt="$SP/sitecustomize.py"
   [ -e "$tgt" ] && [ ! -e "$tgt.asli" ] && cp -a "$tgt" "$tgt.asli"
-  cat > "$tgt" <<'PYEOF'
-import os as _os
-try:
-    _os.getuid = lambda: 2000
-    _os.geteuid = lambda: 2000
-except Exception:
-    pass
-PYEOF
+  install -m644 "$FILES/sitecustomize.py" "$tgt"
   rm -rf "$SP/__pycache__"
-  ok "  sitecustomize.py terpasang"
+  ok "  sitecustomize.py terpasang (uid spoof + bar adapter)"
 }
 
 # =============================================================================
