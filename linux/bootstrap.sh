@@ -338,19 +338,27 @@ step_emu_shims() {
     [ -f "$f" ] || continue
     local b; b="$(basename "$f")"
     case "$b" in *.asli|*.jar|*.zip|*.bin|apt) continue ;; esac
+    # sudah pernah di-shim -> .bin ada, jangan proses ulang (cegah loop yang
+    # meng-overwrite .bin dengan shim itu sendiri).
+    [ -e "$f.aarch64.bin" ] && continue
+    # kalau ini symlink, resolve dulu (jangan rename symlink jadi .bin)
+    local realf="$f"
+    if [ -L "$f" ]; then
+      realf="$(readlink -f "$f" 2>/dev/null)"; [ -e "$realf" ] || continue
+    fi
     # identifikasi ELF aarch64 (machine 0xb7) lewat magic header
-    local hdr; hdr="$(od -An -tx1 -N20 "$f" 2>/dev/null | tr -d ' \n')"
+    local hdr; hdr="$(od -An -tx1 -N20 "$realf" 2>/dev/null | tr -d ' \n')"
     case "$hdr" in 7f454c46*) : ;; *) continue ;; esac
     local mach="${hdr:36:2}"; [ "$mach" = "b7" ] || { skip=$((skip+1)); continue; }
     # sudah shim? (cek shebang)
-    head -c2 "$f" 2>/dev/null | grep -q '#!' && continue
-    mv -f "$f" "$f.aarch64.bin" 2>/dev/null || continue
+    head -c2 "$realf" 2>/dev/null | grep -q '#!' && continue
+    mv -f "$realf" "$f.aarch64.bin" 2>/dev/null || continue
+    [ "$realf" != "$f" ] && rm -f "$f" 2>/dev/null || true
     cat > "$f" <<EOF
 #!/usr/bin/env bash
 export TERMUX_PREFIX="$TERMUX_USR"
 export PREFIX="$TERMUX_USR"
 export HOME="$TERMUX_HOME"
-export JAVA_HOME="\$(dirname "\$(dirname "\$(readlink -f "\$0")")")"
 export LD_LIBRARY_PATH="$SYS64:$TERMUX_USR/lib"
 exec "$qemu" "$f.aarch64.bin" "\$@"
 EOF
