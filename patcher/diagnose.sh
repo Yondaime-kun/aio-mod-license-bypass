@@ -64,8 +64,17 @@ hd "3. sitecustomize"
 if [ -e "$SP/sitecustomize.py" ]; then
   grep -q "getuid" "$SP/sitecustomize.py" && ok "spoof uid ada" || wr "spoof uid TIDAK ada"
   grep -q "ShrinkStream\|_shrink" "$SP/sitecustomize.py" && ok "bar shrinker ada" || wr "bar shrinker TIDAK ada (opsional)"
+  grep -q "_install_net_redirect\|getaddrinfo" "$SP/sitecustomize.py" && ok "network redirect shim ada (WAJIB utk non-root)" || no "network redirect shim TIDAK ada -> engine gak bisa connect ke fake server"
 else
   no "sitecustomize.py TIDAK ada"
+fi
+
+hd "3b. Tes shim network (tanpa /etc/hosts)"
+if grep -q "aio.scwill.store" "$SP/sitecustomize.py" 2>/dev/null && \
+   grep -q "getaddrinfo" "$SP/sitecustomize.py" 2>/dev/null; then
+  ok "shim network terpasang (hostname license -> 127.0.0.1)"
+else
+  no "shim network TIDAK lengkap di sitecustomize"
 fi
 
 hd "4. Sentinel .open_ssl_cache"
