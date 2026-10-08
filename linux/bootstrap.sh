@@ -174,7 +174,7 @@ step_deps() {
            libcompiler-rt make cmake libc++ ndk-multilib \
            ndk-multilib-native-static ndk-multilib-native-stubs ndk-sysroot \
            aapt2 apksigner apktool d8 dx ecj \
-           libandroid-shmem libiconv libandroid-execinfo; do
+           libandroid-shmem libiconv libandroid-execinfo libandroid-spawn; do
     deb_fetch_extract "$p" || true
   done
   mkdir -p "$TERMUX_USR/bin"
