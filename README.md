@@ -17,7 +17,8 @@ HWID ke server asli.
 |---|---|---|---|
 | **Linux x86_64** (Ubuntu 24.04.5 LTS, kernel 6.8.0-101) | — | ✅ **VIP** | `/etc/hosts` + `fakelics.service` (systemd) + qemu-aarch64 |
 | **Linux x86_64** (Ubuntu 22.04.5 LTS, kontainer **tanpa systemd**) | — | ✅ **VIP** | `/etc/hosts` + fake server via **nohup** + qemu-aarch64 |
-| **Termux aarch64** (Android) | Python 3.14.6 | ⚠️ **belum VIP** — engine 27MB **SEGV/fallback** saat dijalankan native | shim `sitecustomize` (non-root) |
+| **Termux aarch64** (Android 12 ARM64 native, container redroid) | Python 3.14.6 | ✅ **VIP** | shim `sitecustomize` + `iptables` REJECT IP license |
+| **Termux aarch64** (HP fisik, non-root) | Python 3.14.x | ⚠️ **belum diuji di HP fisik** — struktur sama, 2 penyesuaian otomatis | shim `sitecustomize` (non-root) |
 
 Catatan jujur per platform:
 
@@ -26,14 +27,16 @@ Catatan jujur per platform:
   yang cocok dari GitHub Release repo ini, menyiapkan fake Termux FS, qemu,
   fake TLS server, runner, dan redirect. Diuji di dua VPS berbeda (satu dengan
   systemd, satu kontainer tanpa systemd).
-- **Termux (non-root)**: **belum tuntas.** Engine 27MB (dynamic, butuh
-  `libpython3.14.so` + `libandroid-support.so` versi spesifik) berjalan tapi
-  jatuh ke mode *Gratis* dengan pesan `Tanda tangan respons server tidak valid`,
-  dan kadang `signal 11` saat dipaksa memakai libpython dari release. Server
-  fake terbukti benar (nonce cocok, `sig` valid, `is_vip:true`), engine identik
-  dengan yang sukses di Linux, tapi verifikasi tetap gagal di lingkungan
-  Termux native. Bagian yang belum terpecahkan: kompatibilitas ABI engine
-  27MB dengan Termux native vs. lingkungan emulasi qemu.
+- **Termux aarch64 (Android 12 ARM64)**: **VIP tercapai**, terverifikasi ulang
+  dari nol (`patch.sh revert` → `install` → `aio` → `★ VIP MEMBER ★`),
+  tanpa langkah manual. Engine 27MB dijalankan **native** (tanpa qemu).
+  Penyebab lama "Gratis" sudah ditemukan & diperbaiki: (1) fake
+  `Crypto.Signature.eddsa` **tidak benar-benar terpasang** (kalah oleh `.pyc`/
+  `.pyi`); (2) CA palsu tidak ada di `certifi/cacert.pem`; (3) dependency engine
+  belum lengkap; (4) `LD_LIBRARY_PATH=/system/lib64` merusak link di Termux.
+- **Termux di HP fisik**: belum diverifikasi sendiri. Perbedaannya cuma
+  hak akses (iptables/hosts), dan patcher sudah memilih jalur otomatis.
+  Status ini akan diperbarui setelah pengujian di HP.
 
 ---
 
@@ -86,8 +89,9 @@ cd aio-mod-license-bypass/termux
 ./bootstrap.sh
 aio
 ```
-> Termux **belum** mencapai VIP saat README ini ditulis — lihat bagian
-> *Status tested*. Perintah di atas menjalankan apa yang sudah ada.
+> Termux Android 12 ARM64 **sudah VIP** (lihat *Status tested*). Di HP fisik,
+> patcher memilih jalur otomatis (non-root) — kalau masih Gratis, lihat
+> [`termux/README.md`](termux/README.md) bagian "Kalau masih Gratis".
 > Detail: [`termux/README.md`](termux/README.md)
 
 ## Troubleshooting
@@ -95,11 +99,14 @@ aio
 | Gejala | Penyebab / cek |
 |---|---|
 | `[ Gratis PENGGUNA ]` + `Koneksi Gagal` | fake server hidup? `pgrep -f fakelicstls` |
-| `Tanda tangan respons server tidak valid` | `req_nonce` respons ≠ `X-Req-Nonce` request |
-| `library "libpython3.14.so" not found` | lib dari release belum terpasang di `/system/lib64` (Linux) |
+| `Tanda tangan respons server tidak valid` | fake `eddsa.py` **tidak benar-benar terpasang** (`.pyc`/`.pyi` menang) → `./patch.sh install` |
+| `TLSV1_ALERT_UNKNOWN_CA` di log fake server | CA palsu belum masuk `certifi/cacert.pem` |
+| Engine berhenti di `Sync resource toolkit...` | dependency kurang → `pkg install zip unzip p7zip aapt openjdk-17 clang` |
+| `library "libpython3.14.so" not found` (Termux native) | `LD_LIBRARY_PATH` salah — JANGAN pakai `/system/lib64` di Termux |
+| `library "libpython3.14.so" not found` (Linux) | lib dari release belum terpasang di `/system/lib64` (Linux) |
 | `library "libandroid-support.so" not found` | `libandroid-support.so` belum ada di samping libpython |
+| `pkg install` → `apt ... required file not found` | shim apt menimpa paket apt → `cp -f $PREFIX/bin/apt.asli $PREFIX/bin/apt` |
 | Loading bar numpuk newline | bar 92 char > lebar layar → `COLUMNS=80` / perkecil font |
-| Termux `Koneksi Gagal` | shim DNS di `sitecustomize` + fake server |
 
 ## Struktur
 ```

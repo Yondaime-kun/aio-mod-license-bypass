@@ -84,16 +84,32 @@ patch_eddsa() {
     [ -e "$tgt" ] || { warn "  $tgt tak ada — $base belum terpasang"; continue; }
     [ -e "$tgt.asli" ] || cp -a "$tgt" "$tgt.asli"
     cp "$FILES/eddsa_fake.py" "$tgt"
+    # Termux punya eddsa.pyi (stub typing) di sebelahnya; hapus supaya tak
+    # menutupi/pembingungkan, dan bersihkan pycache (WAJIB: .pyc lama tetap
+    # dipakai kalau timestamp-nya lebih baru dari .py hasil copy -> engine
+    # tetap pakai verifier ASLI -> gate gagal -> Gratis).
+    rm -f "$SP/$base/Signature/eddsa.pyi"
     rm -rf "$SP/$base/Signature/__pycache__"
-    ok "  $base/Signature/eddsa.py -> fake"
+    # Paksa timestamp .py lebih baru dari segala .pyc yg mungkin tersisa.
+    touch "$tgt"
+    if grep -q "bypass license verify" "$tgt" 2>/dev/null; then
+      ok "  $base/Signature/eddsa.py -> fake (terverifikasi)"
+    else
+      err "  $base/Signature/eddsa.py GAGAL ditimpa fake"
+    fi
     found=1
   done
 
-  # Verifikasi: engine HARUS bisa `import Crypto.Signature.eddsa`
-  if python3 -c "import Crypto.Signature.eddsa" 2>/dev/null; then
-    ok "  import Crypto.Signature.eddsa OK (engine akan pakai fake)"
+  # Verifikasi: engine HARUS bisa `import Crypto.Signature.eddsa` DAN modul
+  # yg ke-import harus benar-benar fake (kalau tidak, engine pakai verifier asli).
+  if python3 -c "
+import Crypto.Signature.eddsa as m, inspect, sys
+src = inspect.getsource(m)
+sys.exit(0 if 'bypass license verify' in src else 3)
+" 2>/dev/null; then
+    ok "  import Crypto.Signature.eddsa -> FAKE (engine akan bypass)"
   else
-    warn "  'import Crypto.Signature.eddsa' GAGAL — cek paket pycryptodome(x)"
+    die "  import Crypto.Signature.eddsa BUKAN fake — pyc/versi bentrok. Cek pycryptodome."
   fi
 
   [ "$found" = 1 ] || die "  pycryptodome belum terpasang: pkg install python-pycryptodomex"
@@ -119,16 +135,19 @@ patch_apt_shim() {
   say "Step 2b/7  Shim apt (skip 'upgrade')"
   local binn="$PREFIX/bin"
   local real="$binn/apt"
-  # Di Termux, apt ada di $PREFIX/bin/apt (file asli dari paket 'apt')
+  # PENTING: JANGAN timpa $PREFIX/bin/apt — dpkg akan gagal "Setting up apt"
+  # (file milik paket 'apt' berubah) sehingga `pkg install` mati total.
+  # Engine mencari `apt` di PATH; cukup taruh shim sebagai `apt` di bin kita
+  # SENDIRI yang lebih depan di PATH daripada $PREFIX/bin.
+  local shim_dir="$RUN_DIR/shim-bin"
+  mkdir -p "$shim_dir"
+  install -m755 "$FILES/apt-shim.sh" "$shim_dir/apt" 2>/dev/null \
+    && ok "  shim apt dipasang di $shim_dir/apt (tidak menimpa paket apt)" \
+    || warn "  gagal pasang shim apt"
+  # apt-get TIDAK di-shim (dpkg & pkg memakainya); biarkan asli.
   if [ -e "$real" ] && [ ! -e "$real.asli" ]; then
     cp -a "$real" "$real.asli" 2>/dev/null || true
   fi
-  # apt asli Termux itu binary; shim kita rujuk ke apt.real/apt.asli
-  if [ -e /usr/bin/apt ] && [ ! -e /usr/bin/apt.asli ]; then
-    cp -a /usr/bin/apt /usr/bin/apt.asli 2>/dev/null || true
-  fi
-  install -m755 "$FILES/apt-shim.sh" "$real" 2>/dev/null \
-    && ok "  shim $real dipasang" || warn "  gagal pasang shim apt"
 }
 
 # =============================================================================
@@ -171,6 +190,19 @@ patch_ca() {
     if ! grep -qF "$(head -1 "$CERTS/we1ca.pem" 2>/dev/null)" "$tls" 2>/dev/null; then
       { cat "$CERTS/we1ca.pem"; [ -f "$CERTS/lc2.pem" ] && cat "$CERTS/lc2.pem"; } >> "$tls" 2>/dev/null \
         && { ok "  root CA + leaf -> $tls"; added=1; }
+    fi
+  fi
+  # PENTING: engine (Nuitka, via _ssl) memakai cacert.pem BAWAAN certifi
+  # (bukan env SSL_CERT_FILE). Kalau CA kita hanya ada di ca-bundle.pem,
+  # handshake tetap ditolak: TLSV1_ALERT_UNKNOWN_CA -> Gratis. Jadi sisipkan
+  # LANGSUNG ke cacert.pem (dan simpan .asli utk revert).
+  local cac="$SP/certifi/cacert.pem"
+  if [ -f "$cac" ]; then
+    [ -e "$cac.asli" ] || cp -a "$cac" "$cac.asli" 2>/dev/null || true
+    if ! grep -qF "$(head -1 "$CERTS/we1ca.pem" 2>/dev/null)" "$cac" 2>/dev/null; then
+      { cat "$CERTS/we1ca.pem"; [ -f "$CERTS/lc2.pem" ] && cat "$CERTS/lc2.pem"; } >> "$cac" 2>/dev/null \
+        && { cacert_n=$(grep -c "BEGIN CERT" "$cac" 2>/dev/null); \
+             ok "  root CA + leaf -> cacert.pem ($cacert_n cert)"; added=1; }
     fi
   fi
   [ "$added" = 1 ] || warn "  tidak ada trust store yg ditemukan — set SSL_CERT_FILE manual"
@@ -283,6 +315,78 @@ patch_engine() {
     cp -f "$libsrc" "$RELEASE_DIR/libpython3.14.so" 2>/dev/null || true
     ok "  libpython3.14.so -> $RELEASE_DIR"
   fi
+}
+
+# =============================================================================
+# STEP 4c — Dependency engine (java/zip/7z/aapt/java...)
+# =============================================================================
+# Temuan lapangan: tanpa paket ini engine berhenti di "Install paket utama
+# AIO-MOD..." / "Sync resource toolkit..." lalu tak pernah sampai menu.
+# Engine TIDAK bisa menginstalnya sendiri di Termux non-root dengan andal,
+# jadi kita pasang lebih dulu (pkg install). Daftar = yg engine cek sendiri.
+patch_deps() {
+  say "Step 4c/7  Dependency engine (zip/7z/aapt/java/clang)"
+  local need=()
+  command -v zip      >/dev/null 2>&1 || need+=(zip)
+  command -v unzip    >/dev/null 2>&1 || need+=(unzip)
+  command -v 7z       >/dev/null 2>&1 || need+=(p7zip)
+  command -v aapt     >/dev/null 2>&1 || need+=(aapt)
+  command -v java     >/dev/null 2>&1 || need+=(openjdk-17)
+  command -v clang    >/dev/null 2>&1 || need+=(clang)
+  command -v python3  >/dev/null 2>&1 || need+=(python)
+  python3 -c 'import Crypto' 2>/dev/null || need+=(python-pycryptodomex)
+  python3 -c 'import nacl'   2>/dev/null || need+=(python-pynacl)
+  python3 -c 'import requests' 2>/dev/null || need+=(python-requests)
+  python3 -c 'import certifi'  2>/dev/null || need+=(python-certifi)
+  if [ "${#need[@]}" = 0 ]; then
+    ok "  semua dependency sudah ada"
+    return 0
+  fi
+  say "  memasang: ${need[*]}"
+  export DEBIAN_FRONTEND=noninteractive
+  # dpkg bisa nyangkut di conffile prompt (sources.list) -> paksa non-interaktif.
+  if command -v apt-get >/dev/null 2>&1; then
+    apt-get -y -o Dpkg::Options::=--force-confnew \
+            -o Dpkg::Options::=--force-confdef install "${need[@]}" >/dev/null 2>&1 \
+      || apt-get -y -f install >/dev/null 2>&1 || true
+  fi
+  # pip utk yg tak ada di repo Termux (certifi/requests/pynacl)
+  for pkg in certifi requests; do
+    python3 -c "import $pkg" 2>/dev/null || \
+      python3 -m pip install --quiet "$pkg" >/dev/null 2>&1 || true
+  done
+  local missing=()
+  for c in zip unzip 7z aapt java clang; do
+    command -v "$c" >/dev/null 2>&1 || missing+=("$c")
+  done
+  [ "${#missing[@]}" = 0 ] \
+    && ok "  dependency terpasang" \
+    || warn "  masih kurang: ${missing[*]} (install manual: pkg install ${missing[*]})"
+}
+
+# =============================================================================
+# STEP 4d — Blokir server license ASLI (engine pakai DoH -> hosts tak cukup)
+# =============================================================================
+# Temuan lapangan: engine me-resolve license host lewat DoH sendiri sehingga
+# /etc/hosts DIABAIKAN; ia benar2 connect ke IP Cloudflare asli lalu gagal.
+# Wajib REJECT IP asli supaya engine jatuh ke 127.0.0.1 (fake server kita).
+# Non-root: coba iptables; kalau tidak bisa, andalkan sitecustomize redirect
+# (lihat patch_dns) dan laporkan apa adanya.
+patch_block_real() {
+  say "Step 4d/7  Blokir IP server license asli (anti-exfil)"
+  local blocked=0 ip
+  if command -v iptables >/dev/null 2>&1 && iptables -L OUTPUT -n >/dev/null 2>&1; then
+    for ip in $LICENSE_IPS; do
+      iptables -C OUTPUT -d "$ip" -j REJECT 2>/dev/null \
+        || iptables -A OUTPUT -d "$ip" -j REJECT 2>/dev/null \
+        && { ok "  iptables REJECT $ip"; blocked=1; }
+    done
+  fi
+  [ "$blocked" = 1 ] \
+    && return 0
+  warn "  iptables tak tersedia/tak diizinkan (Termux non-root normal)"
+  warn "  -> andalan: sitecustomize redirect socket. Kalau engine tetap Gratis,"
+  warn "     jalankan blokir di container/host: iptables -A OUTPUT -d <IP> -j REJECT"
 }
 
 # =============================================================================
@@ -405,10 +509,16 @@ fi
 cp -f "$SP/sitecustomize.py" "$RELEASE_DIR/sitecustomize.py" 2>/dev/null
 mkdir -p "$HOME_DIR/.local/lib/python3.14/site-packages" 2>/dev/null
 cp -f "$SP/sitecustomize.py" "$HOME_DIR/.local/lib/python3.14/site-packages/sitecustomize.py" 2>/dev/null
+# PATH: shim-bin (apt no-op upgrade) HARUS lebih depan dari $PREFIX/bin, kalau
+# tidak engine memanggil apt asli & dpkg bisa rusak. Juga pastikan bin engine
+# (java/zip/7z/aapt/clang) terlihat.
+export PATH="$RUN_DIR/shim-bin:$PREFIX/bin:$PREFIX/bin/applets:\$PATH"
 # LD_LIBRARY_PATH: engine dynamic butuh libpython3.14.so VERSI KHUSUS (bukan
-# libpython Termux biasa). Engine + lib ditaruh di $ENGINE_DIR, dan linker
-# diarahkan ke sana. Tanpa ini: "library libpython3.14.so not found".
-export LD_LIBRARY_PATH="$ENGINE_DIR:$PREFIX/lib:/system/lib64${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+# libpython Termux biasa). Engine + lib ada di $ENGINE_DIR.
+# PENTING (fix lapangan): JANGAN pakai /system/lib64 di Termux native —
+# linker Android namespace 'default' tak memuat lib kita, dan bionic /system
+# beda versi -> "CANNOT LINK EXECUTABLE". Pakai $ENGINE_DIR + $PREFIX/lib.
+export LD_LIBRARY_PATH="$ENGINE_DIR:$PREFIX/lib\${LD_LIBRARY_PATH:+:\$LD_LIBRARY_PATH}"
 # PENTING: engine harus dijalankan PERSIS seperti VPS yang sukses:
 #   CWD        = release dir (engine cari sitecustomize/.aio_work relatif CWD)
 #   PYTHONPATH = release:site-packages (sitecustomize + modul engine)
@@ -442,6 +552,36 @@ do_verify() {
   done
   grep -q "getuid" "$SP/sitecustomize.py" 2>/dev/null && ok "  sitecustomize ok" || { err "  sitecustomize kosong"; fail=1; }
   [ -e "$SHARE/.open_ssl_cache" ] && ok "  .open_ssl_cache ok" || { err "  sentinel hilang"; fail=1; }
+  # CA palsu WAJIB ada di cacert.pem certifi (kalau tidak: TLSV1_ALERT_UNKNOWN_CA)
+  # Cek via PEM utuh CA kita (bukan baris "BEGIN CERTIFICATE" yang juga dimiliki
+  # 120 CA bawaan -> false positive/negative).
+  local cac="$SP/certifi/cacert.pem"
+  local ca_pem="$CERTS/we1ca.pem"
+  if [ -f "$cac" ] && [ -f "$ca_pem" ] && \
+     python3 - "$cac" "$ca_pem" <<'PY' 2>/dev/null
+import sys
+try:
+    cac = open(sys.argv[1], "rb").read()
+    ca  = open(sys.argv[2], "rb").read().strip()
+except Exception:
+    sys.exit(1)
+# Bandingkan isi base64 (abaikan whitespace/header perbedaan minor).
+import re
+norm = lambda b: re.sub(rb"\s+", b"", b)
+sys.exit(0 if norm(ca) in norm(cac) else 1)
+PY
+  then
+    ok "  CA palsu ada di certifi cacert.pem ($(grep -c 'BEGIN CERT' "$cac" 2>/dev/null) cert)"
+  else
+    err "  CA palsu TIDAK ada di certifi cacert.pem (handshake akan ditolak)"; fail=1
+  fi
+  # dependency engine
+  local dm=0
+  for c in zip unzip 7z aapt java; do
+    command -v "$c" >/dev/null 2>&1 && dm=$((dm+1))
+  done
+  [ "$dm" -ge 4 ] && ok "  dependency engine terpasang ($dm/5)" \
+                  || warn "  dependency engine kurang ($dm/5) — engine bisa stuck saat setup"
   pgrep -f "$RUN_DIR/fakelicstls.py" >/dev/null && ok "  fake TLS server aktif" || { err "  fake server mati"; fail=1; }
   [ -x "$PREFIX/bin/aio" ] && ok "  runner 'aio' ok" || { err "  runner hilang"; fail=1; }
   [ -d "$RELEASE_DIR" ] && ok "  release dir ok" || warn "  release dir belum ada: $RELEASE_DIR"
@@ -449,6 +589,7 @@ do_verify() {
   if [ "$fail" = 0 ]; then
     echo -e "${C_G}══ SEMUA KOMPONEN SIAP (Termux native) ══${C_R}"
     echo -e "  Jalankan:  ${C_Y}aio${C_R}   (atau: cd $RELEASE_DIR && ./aio-mod)"
+    echo -e "  Engine akan menampilkan  ${C_Y}★ VIP MEMBER ★${C_R}"
   else
     echo -e "${C_E}══ ADA YANG GAGAL ══${C_R}"; return 1
   fi
@@ -481,7 +622,9 @@ case "${1:-install}" in
     patch_sentinel
     patch_ca
     patch_engine
+    patch_deps
     patch_dns
+    patch_block_real
     patch_server
     patch_runner
     do_verify

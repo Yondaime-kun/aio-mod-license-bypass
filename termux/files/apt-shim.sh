@@ -1,6 +1,6 @@
-#!/bin/bash
+#!/data/data/com.termux/files/usr/bin/bash
 # =============================================================================
-#  Shim /usr/bin/apt  —  dipakai AIO-MOD engine (path hardcoded).
+#  Shim apt  —  dipakai AIO-MOD engine (engine memanggil `apt`, path hardcoded).
 #
 #  Masalah: engine menjalankan `apt upgrade` yang lambat + tidak perlu, dan
 #  progress bar-nya pakai \r sehingga di non-TTY menumpuk newline.
@@ -8,15 +8,21 @@
 #  Shim ini:
 #    - MEMBLOKIR 'upgrade' / 'dist-upgrade' / 'full-upgrade'  (instan, no-op)
 #    - MENERUSKAN 'update' / 'install' / 'remove' ke apt asli
-#    - Jika non-TTY: matikan progress bar sama sekali (--quiet)
+#    - Jika non-TTY: matikan progress bar sama sekali
 #
-#  Dipasang oleh patch.sh / patch-termux.sh ke $PREFIX/bin/apt (menimpa).
-#  Backup asli: $PREFIX/bin/apt.asli
+#  PENTING (fix lapangan): apt asli Termux ada di $PREFIX/bin/apt, BUKAN
+#  /usr/bin/apt. Shim versi lama menunjuk /usr/bin/apt.asli -> tak ketemu ->
+#  `pkg install` mati ("cannot execute: required file not found"). Di sini
+#  REAL_APT di-resolve relatif ke lokasi shim ini sendiri, jadi benar di
+#  Termux ($PREFIX/bin) maupun di Linux (fake Termux FS /usr/bin).
 # =============================================================================
-REAL_APT="/usr/bin/apt.asli"
-# fallback: apt sistem asli
-[ -x "$REAL_APT" ] || REAL_APT="/usr/bin/apt.real"
-[ -x "$REAL_APT" ] || REAL_APT="$(command -v apt-get 2>/dev/null || echo /usr/bin/apt-get)"
+SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REAL_APT=""
+for c in "$SELF_DIR/apt.asli" "$SELF_DIR/apt.real" \
+         "/usr/bin/apt.asli" "/usr/bin/apt.real"; do
+  [ -x "$c" ] && { REAL_APT="$c"; break; }
+done
+[ -n "$REAL_APT" ] || REAL_APT="$(command -v apt-get 2>/dev/null || echo "$SELF_DIR/apt-get")"
 
 # deteksi subcommand (lewati flag global spt -y/-qq)
 SUB=""
@@ -35,9 +41,8 @@ case "$SUB" in
     ;;
 esac
 
-# Non-TTY: paksa non-progress supaya tidak menumpuk \r
+# Non-TTY: matikan progress bar supaya tidak menumpuk \r saat di-log.
 if [ ! -t 1 ]; then
-  exec "$REAL_APT" -o quiet::no-progress=1 -o quiet::no-progress=1 "$@" 2>/dev/null \
-    || exec "$REAL_APT" "$@"
+  exec "$REAL_APT" -o quiet::no-progress=1 "$@"
 fi
 exec "$REAL_APT" "$@"
