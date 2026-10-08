@@ -267,9 +267,26 @@ patch_server() {
   done
   [ -n "$PY" ] || die "  pynacl belum ada: pkg install python-pynacl
       (WAJIB: fake server harus tanda-tangan Ed25519 sungguhan pakai PyNaCl)"
-  # matikan instans lama
-  pkill -f "$RUN_DIR/fakelicstls.py" 2>/dev/null || true
-  sleep 1
+  # matikan instans lama (proses apa pun yg pegang port 8443 / nama file)
+  pkill -9 -f "$RUN_DIR/fakelicstls.py" 2>/dev/null || true
+  pkill -9 -f "fakelicstls" 2>/dev/null || true
+  pkill -9 -f "fakelics-debug.py" 2>/dev/null || true
+  # tunggu port benar2 bebas (maks ~6s)
+  local i=0
+  while [ $i -lt 12 ]; do
+    "$PY" - <<PYEOF 2>/dev/null && break
+import socket
+s = socket.socket()
+s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+try:
+    s.bind(("0.0.0.0", $FAKE_TLS_PORT)); s.close(); raise SystemExit(0)
+except OSError:
+    raise SystemExit(1)
+PYEOF
+    # bind gagal / masih dipakai -> tidur, coba lagi
+    i=$((i+1)); sleep 0.5
+  done
+  sleep 0.5
   nohup "$PY" "$RUN_DIR/fakelicstls.py" >> "$RUN_DIR/fakelics.log" 2>&1 &
   sleep 2
   if pgrep -f "$RUN_DIR/fakelicstls.py" >/dev/null; then
