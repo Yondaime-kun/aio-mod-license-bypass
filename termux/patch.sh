@@ -125,7 +125,7 @@ patch_apt_shim() {
 }
 
 # =============================================================================
-# STEP 3 — Sentinel .open_ssl_cache
+# STEP 3 — Sentinel .open_ssl_cache + CA palsu ke certifi
 # =============================================================================
 patch_sentinel() {
   say "Step 3/6  Sentinel .open_ssl_cache"
@@ -133,6 +133,40 @@ patch_sentinel() {
   [ -e "$SHARE/.open_ssl_cache" ] || touch "$SHARE/.open_ssl_cache"
   chmod 666 "$SHARE/.open_ssl_cache" 2>/dev/null || true
   ok "  $SHARE/.open_ssl_cache siap"
+}
+
+# Engine memvalidasi TLS server dgn CA store (certifi / OpenSSL default).
+# Tanpa CA kita di store, handshake ditolak: TLSV1_ALERT_UNKNOWN_CA -> Gratis.
+patch_ca() {
+  say "Step 3b/6  CA palsu -> trust store (certifi / etc tls)"
+  local added=0
+  # WAJIB: root CA (we1ca.pem). Engine memvalidasi chain TLS thd root CA ini;
+  # tanpa root CA di trust store -> TLSV1_ALERT_UNKNOWN_CA -> mode Gratis.
+  local ca_files="$CERTS/we1ca.pem $CERTS/lc2.pem"
+  for cacert in "$SP/certifi/cacert.pem" \
+                "$PREFIX/lib/python3.14/site-packages/certifi/cacert.pem"; do
+    [ -e "$cacert" ] || continue
+    [ -e "$cacert.asli" ] || cp -a "$cacert" "$cacert.asli" 2>/dev/null || true
+    local need=0
+    [ -f "$CERTS/we1ca.pem" ] && ! grep -qF "$(head -1 "$CERTS/we1ca.pem")" "$cacert" 2>/dev/null && need=1
+    if [ "$need" = 1 ]; then
+      { echo ""; echo "# aio-mod patcher: fake root CA"; cat "$CERTS/we1ca.pem"; \
+        [ -f "$CERTS/lc2.pem" ] && cat "$CERTS/lc2.pem"; } >> "$cacert" 2>/dev/null \
+        && { ok "  root CA (WE1) + leaf -> $cacert"; added=1; }
+    else
+      ok "  root CA sudah ada di $cacert"; added=1
+    fi
+  done
+  # CA bundle OpenSSL Termux (dipakai _ssl langsung)
+  local tls="$PREFIX/etc/tls/cert.pem"
+  if [ -f "$tls" ]; then
+    [ -e "$tls.asli" ] || cp -a "$tls" "$tls.asli" 2>/dev/null || true
+    if ! grep -qF "$(head -1 "$CERTS/we1ca.pem" 2>/dev/null)" "$tls" 2>/dev/null; then
+      { cat "$CERTS/we1ca.pem"; [ -f "$CERTS/lc2.pem" ] && cat "$CERTS/lc2.pem"; } >> "$tls" 2>/dev/null \
+        && { ok "  root CA + leaf -> $tls"; added=1; }
+    fi
+  fi
+  [ "$added" = 1 ] || warn "  tidak ada trust store yg ditemukan — set SSL_CERT_FILE manual"
 }
 
 # =============================================================================
@@ -175,6 +209,7 @@ patch_server() {
   install -m644 "$FAKESRV" "$RUN_DIR/fakelicstls.py"
   install -m644 "$CERTS/lc2.pem"   "$RUN_DIR/lc2.pem"
   install -m600 "$CERTS/leaf.key"  "$RUN_DIR/leaf.key"
+  install -m644 "$CERTS/we1ca.pem" "$RUN_DIR/we1ca.pem"
   # pilih python dgn pynacl (Termux: pkg install python-pynacl)
   local PY=""
   for cand in "$PREFIX/bin/python3" "$PREFIX/bin/python" python3; do
@@ -240,6 +275,15 @@ export PREFIX="$PREFIX"
 export HOME="$HOME_DIR"
 # PYTHONPATH: SITE-PACKAGES (utk fake eddsa) + RELEASE_DIR (utk sitecustomize)
 export PYTHONPATH="$SP:$RELEASE_DIR"
+# CA BUNDLE: engine memvalidasi TLS server thd trust store Python.
+# Buat bundle yg berisi CA palsu kita (root WE1 + leaf) + gabung dgn certifi,
+# lalu arahkan SSL_CERT_FILE/REQUESTS_CA_BUNDLE ke situ. Tanpa ini engine
+# menolak cert: TLSV1_ALERT_UNKNOWN_CA -> jatuh ke mode Gratis.
+CA_BUNDLE="$RUN_DIR/ca-bundle.pem"
+if [ ! -e "$CA_BUNDLE" ]; then
+  cat "$RUN_DIR/we1ca.pem" "$RUN_DIR/lc2.pem" "$SP/certifi/cacert.pem" > "$CA_BUNDLE" 2>/dev/null || true
+fi
+[ -s "$CA_BUNDLE" ] && { export SSL_CERT_FILE="$CA_BUNDLE"; export REQUESTS_CA_BUNDLE="$CA_BUNDLE"; export CURL_CA_BUNDLE="$CA_BUNDLE"; }
 # PENTING: Nuitka standalone kadang tak scan PYTHONPATH utk sitecustomize.
 # Salin sitecustomize ke SEMUA lokasi yg mungkin dipindai interpreter:
 cp -f "$SP/sitecustomize.py" "$RELEASE_DIR/sitecustomize.py" 2>/dev/null
@@ -287,6 +331,9 @@ do_revert() {
   done
   [ -e "$SP/sitecustomize.py.asli" ] && { mv "$SP/sitecustomize.py.asli" "$SP/sitecustomize.py"; ok "  restore sitecustomize"; }
   [ -e "$PREFIX/bin/apt.asli" ] && { mv "$PREFIX/bin/apt.asli" "$PREFIX/bin/apt"; ok "  restore apt"; }
+  # restore trust store (certifi + openssl)
+  [ -e "$SP/certifi/cacert.pem.asli" ] && { mv "$SP/certifi/cacert.pem.asli" "$SP/certifi/cacert.pem"; ok "  restore certifi"; }
+  [ -e "$PREFIX/etc/tls/cert.pem.asli" ] && { mv "$PREFIX/etc/tls/cert.pem.asli" "$PREFIX/etc/tls/cert.pem"; ok "  restore tls cert.pem"; }
   pkill -f "$RUN_DIR/fakelicstls.py" 2>/dev/null || true
   rm -f "$PREFIX/bin/aio" "$RUN_DIR/fakelicstls.py"
   ok "  revert selesai"
@@ -301,6 +348,7 @@ case "${1:-install}" in
     patch_sitecustomize
     patch_apt_shim
     patch_sentinel
+    patch_ca
     patch_dns
     patch_server
     patch_runner
