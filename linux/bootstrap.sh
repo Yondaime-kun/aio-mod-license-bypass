@@ -219,8 +219,7 @@ step_bionic() {
   # Engine 27MB butuh libpython3.14.so + libandroid-support.so yang SPESIFIK
   # (bukan versi .deb Termux biasa). Ambil dari release bypass + verifikasi md5.
   # delimiter '|' (bukan ':' — URL mengandung ':')
-  for pair in "libpython3.14.so|$LIBPY_URL|$LIBPY_MD5" \
-              "libandroid-support.so|$LIBAS_URL|$LIBAS_MD5"; do
+  for pair in "libpython3.14.so|$LIBPY_URL|$LIBPY_MD5"; do
     local name="${pair%%|*}"
     local rest="${pair#*|}"
     local url="${rest%%|*}"
