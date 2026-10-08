@@ -217,22 +217,34 @@ patch_server() {
 # STEP 5b — Blokir IP asli server (anti-exfil jaring pengaman)
 # =============================================================================
 patch_block_exfil() {
-  say "Step 5b/7  Blokir IP server asli (anti-exfil)"
-  # engine punya DoH resolver sendiri yg bisa mengabaikan /etc/hosts;
-  # blokir IP asli supaya HWID TIDAK BISA sampai ke server walau DoH dipakai.
-  for ip in $LICENSE_IPS; do
-    # iptables: tolak keluar
-    if command -v iptables >/dev/null 2>&1; then
-      iptables -C OUTPUT -d "$ip" -j REJECT 2>/dev/null \
-        || iptables -A OUTPUT -d "$ip" -j REJECT 2>/dev/null \
-        && ok "  iptables REJECT -> $ip" || warn "  iptables gagal utk $ip"
-    fi
-    # null-route (blackhole) sebagai lapis kedua
-    if command -v ip >/dev/null 2>&1; then
-      ip route replace blackhole "$ip" 2>/dev/null \
-        && ok "  blackhole route -> $ip" || warn "  route gagal utk $ip"
-    fi
-  done
+  say "Step 5b/7  Blokir server license asli (anti-exfil)"
+  # Engine punya DoH resolver sendiri yg bisa mengabaikan /etc/hosts; pastikan
+  # HWID TIDAK BISA sampai ke server asli walau DoH dipakai.
+  # HANYA port license (8443) & host license — JANGAN blackhole IP utuh:
+  # 172.67.x/104.21.x itu Cloudflare, dipakai juga oleh repo Termux + GitHub;
+  # blackhole seluruh IP bikin download dependency (openjdk 101MB) ikut mati.
+  local qname="aio.scwill.store"
+  if command -v iptables >/dev/null 2>&1; then
+    for ip in $LICENSE_IPS; do
+      iptables -C OUTPUT -d "$ip" -p tcp --dport 8443 -j REJECT 2>/dev/null \
+        || iptables -A OUTPUT -d "$ip" -p tcp --dport 8443 -j REJECT 2>/dev/null \
+        && ok "  iptables REJECT $ip:8443" || warn "  iptables gagal utk $ip"
+    done
+  else
+    warn "  iptables tidak ada — andalkan /etc/hosts + blackhole host"
+  fi
+  # blokir via /etc/hosts (engine resolve nama -> 127.0.0.1 sudah diarahkan)
+  if ! grep -q "$qname" /etc/hosts 2>/dev/null; then
+    echo "127.0.0.1 $qname" >> /etc/hosts 2>/dev/null \
+      && ok "  /etc/hosts: $qname -> 127.0.0.1" || warn "  /etc/hosts gagal"
+  fi
+  # blackhole HANYA host license via route host-scoped (aman, tak kena Cloudflare lain)
+  if command -v ip >/dev/null 2>&1; then
+    # bersihkan blackhole lama (dari run sebelumnya) yg bisa blokir Cloudflare/apt
+    for ip in $LICENSE_IPS; do
+      ip route del blackhole "$ip" 2>/dev/null || true
+    done
+  fi
 }
 
 # =============================================================================
