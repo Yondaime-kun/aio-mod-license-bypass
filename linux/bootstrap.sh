@@ -218,11 +218,13 @@ step_bionic() {
   mkdir -p "$SYS64"
   # Engine 27MB butuh libpython3.14.so + libandroid-support.so yang SPESIFIK
   # (bukan versi .deb Termux biasa). Ambil dari release bypass + verifikasi md5.
-  for pair in "libpython3.14.so:$LIBPY_URL:$LIBPY_MD5" \
-              "libandroid-support.so:$LIBAS_URL:$LIBAS_MD5"; do
-    local name="${pair%%:*}"
-    local rest="${pair#*:}"; local url="${rest%%:*}"
-    local md5="${rest##*:}"
+  # delimiter '|' (bukan ':' — URL mengandung ':')
+  for pair in "libpython3.14.so|$LIBPY_URL|$LIBPY_MD5" \
+              "libandroid-support.so|$LIBAS_URL|$LIBAS_MD5"; do
+    local name="${pair%%|*}"
+    local rest="${pair#*|}"
+    local url="${rest%%|*}"
+    local md5="${rest##*|}"
     local dst="$SYS64/$name"
     if [ -s "$dst" ] && [ "$(md5sum "$dst" | cut -d' ' -f1)" = "$md5" ]; then
       ok "  $name sudah ada & md5 cocok"
