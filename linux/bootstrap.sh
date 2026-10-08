@@ -237,7 +237,17 @@ step_bionic() {
   else
     ok "  bionic libs sudah lengkap"
   fi
-  # libpython: pakai versi dari bionic bundle. Pastikan ada.
+  # linkerconfig: tanpa ini linker64 (bionic) tak menemukan /system/lib64 ->
+  # engine keluar diam-diam tepat setelah start (exit 1, nol output).
+  if [ ! -e /linkerconfig/ld.config.txt ]; then
+    mkdir -p /linkerconfig
+    printf 'dir.system = /system/${LIB}\ndir.system.cfi = /system/${LIB}/cfi\n' \
+      > /linkerconfig/ld.config.txt 2>/dev/null \
+      && ok "  /linkerconfig/ld.config.txt dibuat" \
+      || warn "  linkerconfig gagal dibuat"
+  else
+    ok "  /linkerconfig/ld.config.txt sudah ada"
+  fi
   [ -s "$SYS64/libpython3.14.so" ] \
     && ok "  libpython$PY_MAJOR tersedia" \
     || warn "  libpython$PY_MAJOR belum ada — engine akan gagal load"
