@@ -166,7 +166,7 @@ def _watcher():
                     _patch_module(mod, name)
             # dump every aio-ish module once, to see what IS registered
             if not dumped:
-                aio_like = [n for n in sys.modules if "aio" in (n or "").lower()]
+                aio_like = [n for n in list(sys.modules) if "aio" in (n or "").lower()]
                 if aio_like:
                     dumped = True
                     _log(_PATCH_LOG, "[dump] aio modules: %s" % aio_like)
