@@ -37,11 +37,17 @@ except Exception:
     pass
 
 _DEBUG = os.environ.get("AIO_DEBUG", "0") == "1"
-_LOG = os.environ.get("AIO_REDIRECT_LOG", "/tmp/aio_redirect.log")
-_PATCH_LOG = os.environ.get("AIO_PATCH_LOG", "/tmp/aio_patch.log")
+# Log ke lokasi yang PASTI writable (Termux: /tmp tidak ada; pakai ~/.aio-patcher).
+_DEFLOG = os.path.join(os.path.expanduser("~"), ".aio-patcher")
+_LOG = os.environ.get("AIO_REDIRECT_LOG", os.path.join(_DEFLOG, "aio_redirect.log"))
+_PATCH_LOG = os.environ.get("AIO_PATCH_LOG", os.path.join(_DEFLOG, "aio_patch.log"))
 
 
 def _log(path, msg):
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+    except Exception:
+        pass
     try:
         with open(path, "a") as f:
             f.write(str(msg) + "\n")

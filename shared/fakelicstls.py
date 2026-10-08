@@ -113,8 +113,15 @@ class H(BaseHTTPRequestHandler):
         self._reply(200, build_payload(hwid, req_nonce))
 
     def do_GET(self):
+        # Server asli balas 404 utk GET (engine pakai ini utk fingerprint server).
+        # Balas 200 di sini -> engine menganggap ini bukan server license asli.
         log("GET %s" % self.path)
-        self._reply(200, {"ok": True, "status": "ok"})
+        out = b'{"detail":"Not found"}'
+        self.send_response(404)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(out)))
+        self.end_headers()
+        self.wfile.write(out)
 
     def log_message(self, *a):
         pass
@@ -131,17 +138,20 @@ class Server(ThreadingHTTPServer):
     # Wrap TLS per accepted connection (correct on Android; wrapping the
     # listening socket is invalid and hangs the handshake).
     def get_request(self):
-        sock, addr = self.socket.accept()
-        try:
-            sock = self._sslctx.wrap_socket(sock, server_side=True)
-        except Exception as e:
-            log("TLS handshake failed from %s: %s" % (addr, e))
+        while True:
+            sock, addr = self.socket.accept()
             try:
-                sock.close()
-            except Exception:
-                pass
-            raise
-        return sock, addr
+                sock = self._sslctx.wrap_socket(sock, server_side=True)
+            except Exception as e:
+                log("TLS handshake failed from %s: %s" % (addr, e))
+                try:
+                    sock.close()
+                except Exception:
+                    pass
+                # JANGAN raise: itu menghentikan server (ConnectionResetError
+                # ke klien berikutnya). Lanjut terima koneksi lain.
+                continue
+            return sock, addr
 
 
 def main():
