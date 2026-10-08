@@ -100,7 +100,16 @@ class H(BaseHTTPRequestHandler):
             body = {}
         hwid = body.get("hwid", "AIO3-UNKNOWN")
         req_nonce = self.headers.get("X-Req-Nonce", secrets.token_hex(16))
-        log("POST %s hwid=%s -> VIP" % (self.path, hwid))
+        # DEBUG: log everything the engine sends so we can match its expectations
+        log("POST %s" % self.path)
+        log("  headers: %s" % dict(self.headers))
+        log("  body: %s" % (raw[:600],))
+        try:
+            with open(os.path.join(os.path.dirname(LOG), "req_dump.log"), "ab") as f:
+                f.write(b"=== %s %s ===\n" % (self.path.encode(), self.headers.get("X-Req-Nonce", "").encode()))
+                f.write(raw + b"\n")
+        except Exception:
+            pass
         self._reply(200, build_payload(hwid, req_nonce))
 
     def do_GET(self):
