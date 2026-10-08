@@ -205,7 +205,13 @@ patch_runner() {
 cd "$RELEASE_DIR" || { echo "dir release tak ada: $RELEASE_DIR"; exit 1; }
 export PREFIX="$PREFIX"
 export HOME="$HOME_DIR"
-export PYTHONPATH="$SP"
+# PYTHONPATH: SITE-PACKAGES (utk fake eddsa) + RELEASE_DIR (utk sitecustomize)
+export PYTHONPATH="$SP:$RELEASE_DIR"
+# PENTING: Nuitka standalone kadang tak scan PYTHONPATH utk sitecustomize.
+# Salin sitecustomize ke SEMUA lokasi yg mungkin dipindai interpreter:
+cp -f "$SP/sitecustomize.py" "$RELEASE_DIR/sitecustomize.py" 2>/dev/null
+mkdir -p "$HOME_DIR/.local/lib/python3.14/site-packages" 2>/dev/null
+cp -f "$SP/sitecustomize.py" "$HOME_DIR/.local/lib/python3.14/site-packages/sitecustomize.py" 2>/dev/null
 # pastikan fake server hidup
 pgrep -f "$RUN_DIR/fakelicstls.py" >/dev/null 2>&1 || "$RUN_DIR/start-server.sh" >/dev/null 2>&1
 ./aio-mod "\$@"
