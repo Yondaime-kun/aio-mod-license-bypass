@@ -166,6 +166,16 @@ step_deps() {
   for p in python python-pycryptodomex python-pynacl python-cryptography openssl libsodium libffi zlib libbz2 liblzma libexpat libsqlite; do
     deb_fetch_extract "$p" || true
   done
+  # toolkit runtime: dependency yang engine sendiri minta saat "Configure"
+  # (java, zip, 7z, aapt, zipalign, clang, ndk-multilib, smali/baksmali via
+  # resource zip). Tanpa ini, VIP tetap jalan tapi menu modding APK gagal.
+  say "  4a2. dependency toolkit (java/zip/7z/aapt/apktool/clang/ndk)"
+  for p in openjdk-21 openjdk-17 zip p7zip aapt android-tools clang lld llvm \
+           libcompiler-rt make cmake libc++ ndk-multilib \
+           ndk-multilib-native-static ndk-multilib-native-stubs ndk-sysroot \
+           aapt2 apksigner apktool d8 dx ecj; do
+    deb_fetch_extract "$p" || true
+  done
   # alias Cryptodome <- Crypto (pycryptodomex tidak menyediakan alias)
   if [ -d "$SPT/Crypto" ] && [ ! -d "$SPT/Cryptodome" ]; then
     ln -sfn Crypto "$SPT/Cryptodome" 2>/dev/null && ok "  alias Cryptodome -> Crypto dibuat"
@@ -254,6 +264,42 @@ step_bionic() {
 }
 
 # =============================================================================
+# STEP 5c — QEMU wrapper utk binary aarch64 di fake Termux bin
+# =============================================================================
+# Host x86_64 tidak bisa menjalankan binary aarch64 (java/clang/aapt/...).
+# Engine memanggil mereka lewat PATH -> bungkus tiap ELF aarch64 dengan qemu
+# supaya toolkit (modding APK) benar-benar berfungsi, bukan cuma VIP.
+step_emu_shims() {
+  say "Step 5c/6  Bungkus binary aarch64 (Termux bin) dengan qemu"
+  local bindir="$TERMUX_USR/bin"
+  [ -d "$bindir" ] || { warn "  $bindir tak ada — skip"; return 0; }
+  local qemu; qemu="$(command -v qemu-aarch64-static || echo /usr/bin/qemu-aarch64-static)"
+  local made=0 skip=0
+  for f in "$bindir"/*; do
+    [ -f "$f" ] || continue
+    local b; b="$(basename "$f")"
+    case "$b" in *.asli|*.jar|*.zip|*-will|*-real|apt) continue ;; esac
+    # identifikasi ELF aarch64 (machine 0xb7) lewat magic header
+    local hdr; hdr="$(od -An -tx1 -N20 "$f" 2>/dev/null | tr -d ' \n')"
+    case "$hdr" in 7f454c46*) : ;; *) continue ;; esac
+    local mach="${hdr:36:2}"; [ "$mach" = "b7" ] || { skip=$((skip+1)); continue; }
+    # sudah shim? (cek shebang)
+    head -c2 "$f" 2>/dev/null | grep -q '#!' && continue
+    mv -f "$f" "$f.aarch64.bin" 2>/dev/null || continue
+    cat > "$f" <<EOF
+#!/usr/bin/env bash
+export TERMUX_PREFIX="$TERMUX_USR"
+export PREFIX="$TERMUX_USR"
+export LD_LIBRARY_PATH="$SYS64:$TERMUX_USR/lib"
+exec "$qemu" "$f.aarch64.bin" "\$@"
+EOF
+    chmod 755 "$f"
+    made=$((made+1))
+  done
+  ok "  $made binary dibungkus qemu ($skip non-aarch64 dilewati)"
+}
+
+# =============================================================================
 # STEP 6 — Bypass license (delegasi ke patch.sh)
 # =============================================================================
 step_bypass() {
@@ -276,6 +322,7 @@ step_fs
 step_python
 step_deps
 step_bionic
+step_emu_shims
 step_bypass
 echo
 ok "Bootstrap selesai. Jalankan:  sudo aio"
