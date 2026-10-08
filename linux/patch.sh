@@ -245,7 +245,7 @@ cd "$RELEASE_DIR" || exit 1
 export PREFIX="$TERMUX_USR"
 export HOME="$TERMUX_HOME"
 export PYTHONPATH="$SP"
-export LD_LIBRARY_PATH="/system/lib64"
+export LD_LIBRARY_PATH="$SYS64:$TERMUX_USR/lib:$TERMUX_USR/lib/python3.14/lib-dynload"
 exec qemu-aarch64-static ./aio-mod "\$@"
 EOF
   chmod +x /usr/local/bin/aio

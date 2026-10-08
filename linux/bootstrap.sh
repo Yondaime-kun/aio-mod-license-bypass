@@ -163,7 +163,7 @@ step_deps() {
   say "  4a. paket native (deb Termux)"
   # CATATAN: cffi tidak punya paket deb di Termux (dikirim sebagai wheel);
   # tapi _cffi_backend sudah dibundel di beberapa paket / bisa dari wheel.
-  for p in python python-pycryptodomex python-pynacl python-cryptography openssl libsodium libffi; do
+  for p in python python-pycryptodomex python-pynacl python-cryptography openssl libsodium libffi zlib libbz2 liblzma libexpat libsqlite; do
     deb_fetch_extract "$p" || true
   done
   # alias Cryptodome <- Crypto (pycryptodomex tidak menyediakan alias)
@@ -242,12 +242,17 @@ step_bionic() {
       warn "  $name gagal diunduh"
     fi
   done
-  # lib lain dari .deb Termux (opsional)
+  # lib lain dari .deb Termux: copy SEMUA .so agar linker bionic menemukannya
+  # (libz, libbz2, liblzma, libsqlite, libffi, libsodium, libssl, libcrypto...).
   local src="$TERMUX_USR/lib"
   if [ -d "$src" ]; then
-    for lib in libc.so libm.so libz.so libffi.so libsodium.so; do
-      [ -e "$src/$lib" ] && [ ! -e "$SYS64/$lib" ] && cp -a "$src/$lib" "$SYS64/" 2>/dev/null || true
+    for f in "$src"/*.so "$src"/*.so.*; do
+      [ -e "$f" ] || continue
+      local b; b="$(basename "$f")"
+      [ "$b" = "libpython3.14.so" ] && continue   # versi dari release dipakai
+      [ -e "$SYS64/$b" ] || cp -a "$f" "$SYS64/" 2>/dev/null || true
     done
+    ok "  lib Termux disalin ke $SYS64"
   fi
 
   # BIONIC: engine ELF nya PT_INTERP = /system/bin/linker64 (WAJIB ada, kalau
