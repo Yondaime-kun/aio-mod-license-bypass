@@ -396,13 +396,15 @@ cp -f "$SP/sitecustomize.py" "$HOME_DIR/.local/lib/python3.14/site-packages/site
 # diarahkan ke sana. Tanpa ini: "library libpython3.14.so not found".
 export LD_LIBRARY_PATH="$ENGINE_DIR:$PREFIX/lib:/system/lib64${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 # PENTING: engine harus dijalankan PERSIS seperti VPS yang sukses:
-#   CWD        = $RELEASE_DIR   (engine cari sitecustomize/.aio_work relatif CWD)
-#   PYTHONPATH = $RELEASE_DIR:$SP (sitecustomize + modul engine)
-#   COLUMNS    = 80             (layout engine)
-# Tanpa ini engine login ke jalur berbeda -> "Tanda tangan respons tidak valid".
-cd "\$RELEASE_DIR" || cd "\$HOME" || true
-export PYTHONPATH="\$RELEASE_DIR:\$SP\${PYTHONPATH:+:\$PYTHONPATH}"
-export COLUMNS="\${COLUMNS:-80}"
+#   CWD        = release dir (engine cari sitecustomize/.aio_work relatif CWD)
+#   PYTHONPATH = release:site-packages (sitecustomize + modul engine)
+#   COLUMNS    = 80 (layout engine)
+# Pakai path LITERAL: variabel runner tidak selalu ter-set saat 'aio' dipanggil.
+RELEASE_DIR="${RELEASE_DIR:-$HOME_DIR/release}"
+SP="${SP:-$PREFIX/lib/python3.14/site-packages}"
+cd "$RELEASE_DIR" 2>/dev/null || cd "$HOME" 2>/dev/null || true
+export PYTHONPATH="$RELEASE_DIR:$SP${PYTHONPATH:+:$PYTHONPATH}"
+export COLUMNS="${COLUMNS:-80}"
 # Jalankan engine 27MB dari $ENGINE_DIR (bukan launcher 13.8MB di release/).
 ENGINE_BIN="$ENGINE_DIR/aio-mod-engine"
 [ -x "\$ENGINE_BIN" ] || ENGINE_BIN="$RELEASE_DIR/aio-mod"
