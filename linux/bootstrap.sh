@@ -181,7 +181,7 @@ step_deps() {
            ndk-multilib-native-static ndk-multilib-native-stubs ndk-sysroot \
            aapt2 apksigner apktool d8 dx ecj \
            libandroid-shmem libiconv libandroid-execinfo libandroid-spawn \
-           libzstd libxml2 libedit liblz4 libicu libcurl \
+           libzstd zstd libxml2 libedit liblz4 libicu libcurl \
            radare2 nodejs; do
     deb_fetch_extract "$p" || true
   done
