@@ -94,8 +94,24 @@ else
 fi
 
 hd "6. Fake TLS server (opsional, buat login)"
-pgrep -f fakelicstls >/dev/null 2>&1 && ok "fakelicstls jalan" || wr "fakelicstls TIDAK jalan"
-grep -q "aio.scwill.store" /etc/hosts 2>/dev/null && ok "/etc/hosts redirect ada" || wr "/etc/hosts redirect TIDAK ada (butuh root)"
+if pgrep -f fakelicstls >/dev/null 2>&1; then
+  ok "fakelicstls proses jalan"
+  # cek port beneran listen
+  if command -v ss >/dev/null 2>&1; then
+    ss -tln 2>/dev/null | grep -q ":8443" && ok "port 8443 LISTEN" || no "port 8443 TIDAK listen (server mati?)"
+  fi
+  # test koneksi nyata ke fake server
+  if python3 -c "import socket;s=socket.create_connection(('127.0.0.1',8443),timeout=3);print('connect OK');s.close()" 2>/dev/null; then
+    ok "koneksi ke 127.0.0.1:8443 BERHASIL"
+  else
+    no "koneksi ke 127.0.0.1:8443 GAGAL (fake server tak respons)"
+  fi
+else
+  wr "fakelicstls TIDAK jalan"
+fi
+echo "  --- redirect engine (jalankan 'aio' lalu cek):"
+[ -s /tmp/aio_redirect.log ] && ok "redirect log ada: $(wc -l < /tmp/aio_redirect.log) baris" || echo "  (redirect log kosong — jalankan 'aio' dulu utk test)"
+grep -q "aio.scwill.store" /etc/hosts 2>/dev/null && ok "/etc/hosts redirect ada" || echo "  /etc/hosts: (non-root, dilewati — pakai shim Python)"
 
 hd "KESIMPULAN"
 if [ "$found_fake" = 1 ]; then
