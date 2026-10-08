@@ -22,32 +22,74 @@ try:
 except Exception:
     pass
 
-# ─── DNS redirect (Termux non-root, tanpa /etc/hosts) ────────────────────────
-# Arahkan hostname license ke 127.0.0.1 supaya koneksi engine ditangkap fake
-# server lokal. Non-root tak bisa menulis /etc/hosts, jadi kita shim di layer
-# Python: socket.getaddrinfo / create_connection.
+# ─── Redirect license server ke fake lokal (Termux non-root, tanpa /etc/hosts) ─
+# Engine bisa memakai: getaddrinfo biasa, DoH resolver, atau connect ke IP
+# langsung. Kita shim di SEMUA layer supaya apapun caranya, tetap diarahkan
+# ke 127.0.0.1 (fake server). Fail-open: error apa pun -> perilaku asli.
 _dns_redirect = {
     'aio.scwill.store': '127.0.0.1',
 }
+_LOG = _os.environ.get('AIO_REDIRECT_LOG', '/tmp/aio_redirect.log')
 
 
-def _install_dns_redirect():
+def _log(msg):
+    try:
+        with open(_LOG, 'a') as f:
+            f.write(msg + '\n')
+    except Exception:
+        pass
+
+
+def _install_net_redirect():
     try:
         import socket as _s
+    except Exception:
+        return
+
+    # 1) getaddrinfo: map hostname -> 127.0.0.1
+    try:
         _orig_gai = _s.getaddrinfo
 
         def _gai(host, *args, **kwargs):
-            tgt = _dns_redirect.get(host)
-            if tgt:
-                return _orig_gai(tgt, *args, **kwargs)
+            if isinstance(host, str) and host in _dns_redirect:
+                _log('[redirect] getaddrinfo %s -> %s' % (host, _dns_redirect[host]))
+                return _orig_gai(_dns_redirect[host], *args, **kwargs)
             return _orig_gai(host, *args, **kwargs)
 
         _s.getaddrinfo = _gai
     except Exception:
         pass
 
+    # 2) connect / connect_ex: kalau target IP = IP server asli, alihkan ke 127.0.0.1
+    _BLOCKED_IPS = {'172.67.143.135', '104.21.46.254'}
+    try:
+        _orig_conn = _s.socket.connect
+        _orig_connex = _s.socket.connect_ex
 
-_install_dns_redirect()
+        def _fix_addr(address):
+            try:
+                if isinstance(address, tuple) and address:
+                    host = address[0]
+                    if host in _BLOCKED_IPS:
+                        _log('[redirect] connect %s -> 127.0.0.1' % host)
+                        return ('127.0.0.1',) + tuple(address[1:])
+            except Exception:
+                pass
+            return address
+
+        def _connect(self, address):
+            return _orig_conn(self, _fix_addr(address))
+
+        def _connect_ex(self, address):
+            return _orig_connex(self, _fix_addr(address))
+
+        _s.socket.connect = _connect
+        _s.socket.connect_ex = _connect_ex
+    except Exception:
+        pass
+
+
+_install_net_redirect()
 # ─────────────────────────────────────────────────────────────────────────────
 
 _ANSI = _re.compile(r'\x1b\[[0-9;]*m')
