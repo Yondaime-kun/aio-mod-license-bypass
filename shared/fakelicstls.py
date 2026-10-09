@@ -25,6 +25,26 @@ except Exception:
     SK = None
     HAVE_NACL = False
 
+# Fallback: kalau PyNaCl tak ada (Termux: cffi/_cffi_backend sering hilang),
+# pakai `cryptography` (paket apt python-cryptography) untuk Ed25519.
+_CRYPTO_SK = None
+if SK is None:
+    try:
+        from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+        from cryptography.hazmat.primitives import serialization
+        _CRYPTO_SK = Ed25519PrivateKey.generate()
+    except Exception:
+        _CRYPTO_SK = None
+
+
+def _sign_ed25519(msg: bytes) -> bytes:
+    """Tanda-tangan Ed25519; PyNaCl dulu, lalu cryptography, lalu dummy 64B."""
+    if SK is not None:
+        return SK.sign(msg).signature
+    if _CRYPTO_SK is not None:
+        return _CRYPTO_SK.sign(msg)
+    return b"\x00" * 64
+
 BASE = os.path.dirname(os.path.abspath(__file__))
 
 
@@ -74,13 +94,7 @@ def build_payload(hwid, req_nonce):
         "sig_kid": SIG_KID,
     }
     msg = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
-    if SK is not None:
-        payload["ed25519_sig"] = b64u(SK.sign(msg).signature)
-    else:
-        # Engine hanya CEK KEBERADAAN ed25519_sig (bukan verifikasi kripto —
-        # terbukti: key acak tetap lolos, tapi tanpa field ini engine tolak).
-        # Kirim signature dummy 64-byte supaya gate tetap lolos tanpa PyNaCl.
-        payload["ed25519_sig"] = b64u(b"\x00" * 64)
+    payload["ed25519_sig"] = b64u(_sign_ed25519(msg))
     payload["sig"] = hmac.new(b"aio-license", msg, hashlib.sha256).hexdigest()
     return payload
 

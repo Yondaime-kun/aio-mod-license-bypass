@@ -188,12 +188,18 @@ sys.exit(0 if hasattr(k, 'verify') else 4)
 #          tapi tetap pasang utk konsistensi)
 # =============================================================================
 patch_sitecustomize() {
-  say "Step 2/7  sitecustomize (spoof uid + bar shrinker)"
+  say "Step 2/7  sitecustomize (spoof uid + bar shrinker + hook [Job/Claim])"
   local tgt="$SP/sitecustomize.py"
   [ -e "$tgt" ] && [ ! -e "$tgt.asli" ] && cp -a "$tgt" "$tgt.asli"
   install -m644 "$FILES/sitecustomize.py" "$tgt"
   rm -rf "$SP/__pycache__"
-  ok "  sitecustomize.py terpasang (uid spoof + bar adapter)"
+  ok "  sitecustomize.py terpasang (uid spoof + bar adapter + hook claim)"
+  # aio-session.py: wrapper pipe agar hook dimuat walau stdin tty
+  if [ -f "$FILES/aio-session.py" ]; then
+    mkdir -p "$RUN_DIR"
+    install -m755 "$FILES/aio-session.py" "$RUN_DIR/aio-session.py"
+    ok "  aio-session.py terpasang di $RUN_DIR (mode hook: AIO_HOOK=1)"
+  fi
 }
 
 # =============================================================================
@@ -683,6 +689,18 @@ case "\$RUN_BIN" in
   *"/engine/"*) export LD_LIBRARY_PATH="\$RUN_DIR/engine:$PREFIX/lib\${LD_LIBRARY_PATH:+:\$LD_LIBRARY_PATH}" ;;
 esac
 cd "\$RUN_DIR/upstream" 2>/dev/null || cd "$RELEASE_DIR" 2>/dev/null || cd "$HOME_DIR" 2>/dev/null || true
+# ---------------------------------------------------------------------------
+# MODE HOOK (AIO_HOOK=1): jalankan engine dgn stdin/stdout PIPE supaya
+# sitecustomize (hook [Job/Claim]) DIMUAT. Tanpa ini, stdin = tty -> engine
+# ambil jalur embedded yang MELEWATI site module -> hook mati.
+# I/O di-relay manual oleh $RUN_DIR/aio-session.py.
+# ---------------------------------------------------------------------------
+if [ "\${AIO_HOOK:-0}" = "1" ] && [ -f "\$RUN_DIR/aio-session.py" ]; then
+  export AIO_RUN_BIN="\$RUN_BIN"
+  export AIO_CWD="\$PWD"
+  export AIO_HOOK_LOG="\$RUN_DIR/aio-session.log"
+  exec "\$PREFIX/bin/python3" "\$RUN_DIR/aio-session.py" "\$@"
+fi
 exec "\$RUN_BIN" "\$@"
 EOF
   chmod +x "$PREFIX/bin/aio"
