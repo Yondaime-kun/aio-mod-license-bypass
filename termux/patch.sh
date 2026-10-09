@@ -116,6 +116,64 @@ sys.exit(0 if 'bypass license verify' in src else 3)
 }
 
 # =============================================================================
+# STEP 1b — Fake cryptography.Ed25519 (PENENTU saat paket cryptography ada)
+# =============================================================================
+# TEMUAN PALING PENTING (reproduced A/B/C):
+#   Engine memilih backend verifikasi secara adaptif.
+#     - TANPA paket 'cryptography'  -> pakai Crypto.Signature.eddsa  -> fake eddsa
+#       di Step 1 BERPENGARUH -> VIP.
+#     - DENGAN paket 'cryptography' -> pakai cryptography.hazmat...
+#       Ed25519PublicKey.verify() (implementasi RUST) -> fake eddsa TIDAK
+#       dipakai sama sekali -> engine jatuh ke [ Gratis ] dengan pesan
+#       "Tanda tangan respons server tidak valid".
+#   Gejala khas di HP: eddsa_hook.log TIDAK PERNAH dibuat, padahal
+#   Crypto/Signature/eddsa.py sudah FAKE (karena engine tidak mengimpornya).
+#   -> Solusi: timpa juga cryptography...ed25519 dengan verify() no-op.
+patch_cryptography() {
+  say "Step 1b/7  Fake cryptography Ed25519 (kalau paket cryptography ada)"
+  # Modul target: cryptography/hazmat/primitives/asymmetric/ed25519.py
+  local targets=()
+  local d
+  for d in "$SP/cryptography/hazmat/primitives/asymmetric" \
+           "$PREFIX/lib/python3.14/site-packages/cryptography/hazmat/primitives/asymmetric"; do
+    [ -d "$d" ] && targets+=("$d/ed25519.py")
+  done
+  if [ "${#targets[@]}" = 0 ]; then
+    ok "  paket cryptography tidak ada — engine akan pakai Crypto.Signature.eddsa (Step 1)"
+    return 0
+  fi
+  [ -f "$FILES/ed25519_fake.py" ] || { warn "  ed25519_fake.py tak ada di $FILES"; return 0; }
+  local t
+  for t in "${targets[@]}"; do
+    [ -e "$t" ] || continue
+    [ -e "$t.asli" ] || cp -a "$t" "$t.asli"
+    cp "$FILES/ed25519_fake.py" "$t"
+    rm -rf "$(dirname "$t")/__pycache__"
+    touch "$t"
+    if grep -q "BYPASS verifikasi" "$t" 2>/dev/null; then
+      ok "  cryptography .../ed25519.py -> fake (verify no-op)"
+    else
+      err "  cryptography .../ed25519.py GAGAL ditimpa"
+    fi
+  done
+  # Verifikasi import: kelas yg ke-load harus fake, dan verify() harus no-op.
+  if python3 -c "
+import sys
+from cryptography.hazmat.primitives.asymmetric import ed25519
+k = ed25519.Ed25519PublicKey.from_public_bytes(b'\x00'*32)
+try:
+    k.verify(b'\x00'*64, b'x')   # fake: tidak melempar
+except Exception:
+    sys.exit(3)
+sys.exit(0 if hasattr(k, 'verify') else 4)
+" 2>/dev/null; then
+    ok "  cryptography Ed25519PublicKey.verify() -> no-op (bypass)"
+  else
+    warn "  verifikasi fake cryptography gagal — cek versi paket cryptography"
+  fi
+}
+
+# =============================================================================
 # STEP 2 — sitecustomize (spoof uid; di Termux native getuid biasanya sudah 0/10123,
 #          tapi tetap pasang utk konsistensi)
 # =============================================================================
@@ -550,6 +608,17 @@ do_verify() {
     grep -qi "bypass license verify" "$f" 2>/dev/null \
       && ok "  fake: $base" || { err "  BUKAN fake: $base"; fail=1; }
   done
+  # cryptography ed25519 WAJIB fake kalau paket cryptography terpasang
+  # (kalau tidak: engine pakai verifier RUST -> "Tanda tangan respons server
+  # tidak valid" -> Gratis, walau Crypto/Signature/eddsa.py sudah fake).
+  local ce="$SP/cryptography/hazmat/primitives/asymmetric/ed25519.py"
+  if [ -e "$ce" ]; then
+    grep -q "BYPASS verifikasi" "$ce" 2>/dev/null \
+      && ok "  fake: cryptography Ed25519 (verify no-op)" \
+      || { err "  cryptography Ed25519 BUKAN fake — engine akan Gratis"; fail=1; }
+  else
+    ok "  cryptography tidak terpasang (engine pakai fake eddsa)"
+  fi
   grep -q "getuid" "$SP/sitecustomize.py" 2>/dev/null && ok "  sitecustomize ok" || { err "  sitecustomize kosong"; fail=1; }
   [ -e "$SHARE/.open_ssl_cache" ] && ok "  .open_ssl_cache ok" || { err "  sentinel hilang"; fail=1; }
   # CA palsu WAJIB ada di cacert.pem certifi (kalau tidak: TLSV1_ALERT_UNKNOWN_CA)
@@ -601,6 +670,9 @@ do_revert() {
     local f="$SP/$base/Signature/eddsa.py"
     [ -e "$f.asli" ] && { mv "$f.asli" "$f"; ok "  restore $base"; }
   done
+  # restore cryptography ed25519 (kalau pernah di-fake)
+  local ce="$SP/cryptography/hazmat/primitives/asymmetric/ed25519.py"
+  [ -e "$ce.asli" ] && { mv "$ce.asli" "$ce"; rm -rf "$(dirname "$ce")/__pycache__"; ok "  restore cryptography ed25519"; }
   [ -e "$SP/sitecustomize.py.asli" ] && { mv "$SP/sitecustomize.py.asli" "$SP/sitecustomize.py"; ok "  restore sitecustomize"; }
   [ -e "$PREFIX/bin/apt.asli" ] && { mv "$PREFIX/bin/apt.asli" "$PREFIX/bin/apt"; ok "  restore apt"; }
   # restore trust store (certifi + openssl)
@@ -617,6 +689,7 @@ case "${1:-install}" in
     echo -e "║  AIO-MOD PATCHER — Termux Native (aarch64)   ║"
     echo -e "╚══════════════════════════════════════════════╝${C_R}"
     patch_eddsa
+    patch_cryptography
     patch_sitecustomize
     patch_apt_shim
     patch_sentinel
