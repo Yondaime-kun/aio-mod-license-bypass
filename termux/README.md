@@ -128,7 +128,8 @@ Urutan cek — **urutan penyebab yang terbukti di lapangan**, dari yang paling s
 ## Perintah
 
 ```bash
-./patch.sh install   # terapkan bypass
+./patch.sh install   # terapkan bypass (unduh binary upstream otomatis)
+./patch.sh update    # ambil binary upstream versi terbaru saja
 ./patch.sh verify    # cek status
 ./patch.sh revert    # kembalikan seperti semula
 ./diagnose.sh
@@ -136,7 +137,36 @@ Urutan cek — **urutan penyebab yang terbukti di lapangan**, dari yang paling s
 
 Patcher **idempotent** — aman diulang. File yang di-patch di-backup `.asli`.
 
+## Update ke versi baru (auto)
+
+Jalur utama `aio` sekarang adalah **binary resmi dari `willstore69/toolkit`**
+yang diunduh otomatis — bukan engine dari repo ini.
+
+```bash
+./patch.sh update     # ambil binary upstream versi terbaru
+aio
+```
+
+Cara kerja:
+
+1. Cek GitHub API `willstore69/toolkit/releases/latest` → ambil URL aset
+   `aio-mod`. Kalau API gagal (rate limit/offline), fallback ke tag tetap `3.5`.
+2. Binary disimpan sebagai `~/.aio-patcher/upstream/aio-mod`. **Nama file WAJIB
+   `aio-mod`** — binary memeriksa `argv[0]`; nama lain membuatnya keluar
+   diam-diam tanpa output (gejala: `EXIT=0` tanpa teks apa pun).
+3. Runner `aio` memprioritaskan binary upstream; engine 27MB hanya fallback.
+
+**Kenapa bisa:** binary `aio-mod` upstream *self-contained* — membawa engine-nya
+sendiri (payload terenkripsi ±12 MB di dalam file 13.8 MB) **dan tetap membaca
+`sitecustomize.py` + `site-packages` dari `PYTHONPATH` luar**. Terbukti: dengan
+`PYTHONPATH` → sitecustomize kita ke-load; tanpa → tidak. Jadi patch kita
+(fake `eddsa`/`cryptography`, redirect, fake TLS server) berlaku langsung
+terhadap binary upstream apa adanya.
+
+Ketika upstream merilis versi baru, cukup `./patch.sh update`.
+
 ## Catatan
+- Binary upstream **hanya jalan kalau namanya `aio-mod`** (cek `argv[0]`).
 - Loading bar engine lebarnya ~92 kolom; di layar HP bar-wrap jadi newline.
   Perkecil font / landscape, atau biarkan (murni kosmetik).
 - Redirect server via Python berarti engine tidak perlu `/etc/hosts`.
