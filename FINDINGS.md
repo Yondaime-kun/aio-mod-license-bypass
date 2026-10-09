@@ -173,13 +173,38 @@ Driver `script -qec aio /dev/null` + `send-keys` juga bekerja.
 VPS john sudah dibersihkan (hanya item yang kita tambah; existing tidak
 disentuh). VPS utama: `/tmp` sesi dibersihkan, `fakelics.service` aktif.
 
-## 9. Yang MASIH TERBUKA
+## 9. Tes end-to-end dengan APK ASLI — SUKSES (2026-10-09)
 
-1. **Tes APK asli end-to-end** — gate claim sudah dilewati, tapi belum
-   dibuktikan patch smali sampai output APK selesai (butuh APK valid +
-   dependency `smali`/`baksmali`/`zip`/`aapt`).
-2. **Hook di HP Termux fisik (tty)** — hook TIDAK ke-load saat stdin tty.
-   Perlu steering via pipe, atau jalur lain, supaya user bisa pakai
-   `[Job/Claim]`-gated tools langsung dari HP.
-3. **Token claim asli** — kalau mau respons `/v1/job/claim` yang "sah",
-   butuh server asli (kunci ada di sana). Hook client-side lebih praktis.
+APK: F-Droid `org.fdroid.fdroid` 11.9 MB (kelas.dex + classes2.dex).
+Patch: `[3] Patcher Smali → [4] Bypass hanya Install dari Play Store`.
+
+Output engine:
+
+```
+i INFO    Memproses 2 file DEX...
+! PERINGATAN Tidak ada patch smali Play Store yang cocok; Lanjut cek Pairip LicenseActivity
+⠋ Menerapkan patch Pairip LicenseActivity...   (selesai)
+i INFO    Pairip Play Store manifest patch: SKIP aplikasi=org.fdroid.fdroid.FDroidApp
+i INFO    Menyiapkan APK unsigned dengan data tanda tangan original tetap disimpan...
+i INFO    Menjalankan zipalign APK sebelum preserving V2/V3 block...
+✓ BERHASIL Unsign preserve OK: V1=3 file, zipalign OK, V2/V3 Signing Mengunci=4096 bytes tetap original.
+✓ BERHASIL Keluaran: .../org.fdroid.fdroid-1021050-arm64_v8a_mod_playstore.apk
+```
+
+- Output APK: **11.903.392 byte**, valid (`unzip -l` OK, META-INF + DEX utuh).
+- Hook log: `_aio_job_claim HOOKED ×3 args=('SSL_PINNING_BYPASS','8bf1f433a424…')`.
+- `[Job/Claim] Server menolak claim` **tidak pernah muncul**.
+
+**Inti pipeline engine berjalan penuh** dari gate claim → parse DEX → patch →
+repack → zipalign → preserve V1/V2/V3. (F-Droid tidak punya pattern Play-Store
+spesifik, jadi patch di-SKIP secara sah — bukan error.)
+
+## 10. Yang MASIH TERBUKA
+
+1. **Hook di HP Termux fisik (tty)** — hook TIDAK ke-load saat stdin tty.
+   Solusi terbukti di VPS: jalankan engine via subprocess dgn stdin PIPE +
+   steer lewat file yang di-poll (`steer.py`). Belum diporting ke Termux HP.
+2. **Port `steer.py` ke Termux** — supaya user bisa pakai tool `[Job/Claim]`-gated
+   langsung dari HP (bukan cuma VIP).
+3. **Token claim asli** — respons `/v1/job/claim` yang "sah" butuh server asli
+   (kunci ada di sana). Hook client-side lebih praktis.

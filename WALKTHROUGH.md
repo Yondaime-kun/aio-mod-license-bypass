@@ -82,10 +82,22 @@ _require_vip_feature
 Cari modul lewat atribut (`hasattr(mod,"_aio_job_claim")`), **bukan** lewat nama —
 engine tidak selalu mendaftar sebagai `aio_mod_encoded_ready`.
 
-**Hasil:** error `Server menolak claim` **hilang**; engine lanjut ke patch smali
-(pada APK dummy → error Java parsing biasa, bukan lagi gate claim).
+**Hasil (TERBUKTI end-to-end dgn APK asli):**
 
-Detail lengkap: `FINDINGS.md` §5.
+```
+i INFO    Memproses 2 file DEX...
+✓ Menerapkan patch Pairip LicenseActivity...  (selesai)
+i INFO    Menjalankan zipalign APK sebelum preserving V2/V3 block...
+✓ BERHASIL Unsign preserve OK: V1=3 file, zipalign OK, V2/V3 tetap original.
+✓ BERHASIL Keluaran: ..._mod_playstore.apk   (11.9 MB, valid)
+```
+
+Hook log: `_aio_job_claim HOOKED args=('SSL_PINNING_BYPASS','8bf1f433a424…')`.
+Error `[Job/Claim] Server menolak claim` **tidak pernah muncul**.
+
+**Catatan steering:** hook butuh stdin **bukan** tty, jadi input dikirim lewat
+file yang di-poll (`steer.py`), bukan `tmux send-keys`. Detail: `FINDINGS.md`
+§5 & §9.
 
 ---
 

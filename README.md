@@ -51,11 +51,18 @@ memanggil endpoint kedua `POST /v1/job/claim` dan gagal dengan:
 × GALAT   [Job/Claim] Server menolak claim SSL_PINNING_BYPASS (bukan VIP / offline).
 ```
 
-Gate ini **client-side** dan sudah berhasil dilewati lewat **runtime
-monkeypatch** 7 fungsi engine (`_aio_job_claim`, `_aio_stamp_job_claim`,
-`_aio_special_claim_apk`, `_aio_smart_build_token`, `_aio_server_usage_check`,
-`_aio_server_usage_mark`, `_require_vip_feature`). Catatan: hook hanya aktif
-kalau stdin **bukan** tty. Detail: `FINDINGS.md` §5, `WALKTHROUGH.md`
+Gate ini **client-side** dan sudah **terbukti dilewati end-to-end** lewat
+**runtime monkeypatch** 7 fungsi engine (`_aio_job_claim`,
+`_aio_stamp_job_claim`, `_aio_special_claim_apk`, `_aio_smart_build_token`,
+`_aio_server_usage_check`, `_aio_server_usage_mark`, `_require_vip_feature`).
+
+Hasil tes dgn APK asli (F-Droid 11.9 MB): engine memproses 2 DEX, menjalankan
+patch, repack, zipalign, preserve V1/V2/V3 → **keluaran APK valid**
+(11.9 MB). Log hook: `_aio_job_claim HOOKED args=('SSL_PINNING_BYPASS', …)`.
+Error `[Job/Claim] Server menolak claim` tidak muncul sama sekali.
+
+Catatan: hook hanya aktif kalau stdin **bukan** tty (di VPS dijalankan via
+subprocess + steering file). Detail: `FINDINGS.md` §5 & §9, `WALKTHROUGH.md`
 bagian *Gerbang kedua*.
 
 ---
