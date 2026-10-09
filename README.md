@@ -99,7 +99,8 @@ aio
 | Gejala | Penyebab / cek |
 |---|---|
 | `[ Gratis PENGGUNA ]` + `Koneksi Gagal` | fake server hidup? `pgrep -f fakelicstls` |
-| `Tanda tangan respons server tidak valid` | fake `eddsa.py` **tidak benar-benar terpasang** (`.pyc`/`.pyi` menang) → `./patch.sh install` |
+| `Tanda tangan respons server tidak valid` (dengan `eddsa_hook.log` kosong) | **paket `cryptography` ada** → engine pakai verifier Rust → `./patch.sh install` (Step 1b) |
+| `Tanda tangan respons server tidak valid` (lainnya) | fake `eddsa.py` **tidak benar-benar terpasang** (`.pyc`/`.pyi` menang) → `./patch.sh install` |
 | `TLSV1_ALERT_UNKNOWN_CA` di log fake server | CA palsu belum masuk `certifi/cacert.pem` |
 | Engine berhenti di `Sync resource toolkit...` | dependency kurang → `pkg install zip unzip p7zip aapt openjdk-17 clang` |
 | `library "libpython3.14.so" not found` (Termux native) | `LD_LIBRARY_PATH` salah — JANGAN pakai `/system/lib64` di Termux |

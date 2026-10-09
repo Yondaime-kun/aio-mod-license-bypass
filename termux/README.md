@@ -46,9 +46,24 @@ pkg install -y apt
 
 Urutan cek — **urutan penyebab yang terbukti di lapangan**, dari yang paling sering:
 
-1. **Fake `Crypto.Signature.eddsa` TIDAK terpasang.** Ini penyebab #1.
-   `.pyc` lama / `eddsa.pyi` bisa menang atas file hasil copy, sehingga engine
-   tetap memakai verifier ASLI → Gratis. Cek:
+0. **Paket `cryptography` terpasang.** **INI PENYEBAB #1 di HP fisik.** Engine memilih
+   backend verifikasi secara adaptif: kalau `cryptography` ada, ia memakai
+   `cryptography.hazmat...Ed25519PublicKey.verify()` (implementasi RUST) dan
+   **mengabaikan `Crypto.Signature.eddsa`** — jadi fake eddsa tak berpengaruh →
+   `× GALAT Tanda tangan respons server tidak valid` → `[ Gratis PENGGUNA ]`.
+   Gejala khas: `~/.aio-patcher/eddsa_hook.log` **tidak pernah dibuat** walau
+   `Crypto/Signature/eddsa.py` sudah fake. Cek & perbaiki:
+   ```bash
+   python3 -c "import cryptography; print(cryptography.__version__)"   # kalau ada -> ini penyebabnya
+   ls -la ~/.aio-patcher/cryptography_hook.log                          # harus ada + berisi 'BYPASS'
+   ./patch.sh install        # Step 1b menimpa cryptography/.../ed25519.py
+   ```
+   Patcher menimpa `cryptography/hazmat/primitives/asymmetric/ed25519.py`
+   dengan `verify()` no-op. Tidak perlu uninstall `cryptography`.
+
+1. **Fake `Crypto.Signature.eddsa` TIDAK terpasang.** Berlaku saat `cryptography`
+   **tidak** ada (engine jatuh ke pycryptodome). `.pyc` lama / `eddsa.pyi` bisa
+   menang atas file hasil copy, sehingga engine tetap memakai verifier ASLI → Gratis. Cek:
    ```bash
    grep -c "bypass license verify" $PREFIX/lib/python3.14/site-packages/Crypto/Signature/eddsa.py
    ```
