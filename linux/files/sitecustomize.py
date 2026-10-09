@@ -37,11 +37,32 @@ except Exception:
     pass
 
 _DEBUG = os.environ.get("AIO_DEBUG", "0") == "1"
-_LOG = os.environ.get("AIO_REDIRECT_LOG", "/tmp/aio_redirect.log")
-_PATCH_LOG = os.environ.get("AIO_PATCH_LOG", "/tmp/aio_patch.log")
+# Log: Linux punya /tmp yang writable (systemd root). Fallback ke ~/.aio-patcher
+# kalau /tmp tidak bisa ditulis (mis. sandbox).
+def _pick_logdir():
+    for d in ("/tmp", "/var/log", os.path.join(os.path.expanduser("~"), ".aio-patcher")):
+        try:
+            os.makedirs(d, exist_ok=True)
+            probe = os.path.join(d, ".aio_w")
+            with open(probe, "w") as f:
+                f.write("")
+            os.remove(probe)
+            return d
+        except Exception:
+            continue
+    return os.path.join(os.path.expanduser("~"), ".aio-patcher")
+
+
+_DEFLOG = _pick_logdir()
+_LOG = os.environ.get("AIO_REDIRECT_LOG", os.path.join(_DEFLOG, "aio_redirect.log"))
+_PATCH_LOG = os.environ.get("AIO_PATCH_LOG", os.path.join(_DEFLOG, "aio_patch.log"))
 
 
 def _log(path, msg):
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+    except Exception:
+        pass
     try:
         with open(path, "a") as f:
             f.write(str(msg) + "\n")
@@ -110,18 +131,82 @@ _install_net_redirect()
 
 # ── 3. license-gate monkeypatch watcher ──────────────────────────────────────
 _GATE_NAMES = (
-    "_aio_ed25519_payload_ok",
-    "_aio_server_free_verify",
-    "_aio_license_pin_ok",
+    # nama sebenarnya (dari ekstraksi dump memori runtime engine)
+    "_aio_ed25519_payload_ok",     # verifikasi signature payload (gate utama)
+    "_aio_license_pin_ok",         # verifikasi cert pin
+    "_aio_api_signed_payload_ok",  # verifikasi HMAC 'sig' respons
+    "_aio_server_free_verify",     # path gratis (jadikan lolos juga)
+    "_aio_server_device_check",    # panggilan /v1/device/check
+    "_aio_server_usage_check",
+    # nama lama (jaga-jaga kalau versi engine beda)
+    "_vip_server_verified",
+    "_aio_ed25519_verify",
     "_verify_pubkey_pin",
     "_verify_free_pass",
     "_verify_decode_block",
-    "_vip_server_verified",
-    "_aio_server_device_check",
-    "_aio_ed25519_verify",
 )
 _SUBMODULES = ("license", "license_client", "setup_tools", "login_system",
                "core", "utils", "login", "server", "verify")
+
+# ── 3b. hook gate [Job/Claim] (lapis-2) ──────────────────────────────────────
+# Fungsi ini mengembalikan DICT (token/entitlement), bukan bool. Kalau di-set
+# True, engine gagal parse -> jalan keluarnya: kembalikan dict "sukses" palsu.
+# Referensi: dump memori engine + docstring source (lihat FINDINGS.md repo).
+_CLAIM_NAMES = (
+    "_aio_job_claim",          # claim per-tool (feature + job_hash)
+    "_aio_stamp_job_claim",    # tempel claim-id ke APK (best-effort, no-op OK)
+    "_aio_special_claim_apk",  # claim special/VIP+ APK
+    "_aio_smart_build_token",  # token build Smart/Special
+)
+_USAGE_NAMES = (
+    "_aio_server_usage_check",  # kuota -> izinkan
+    "_aio_server_usage_mark",   # tandai pakai -> no-op
+)
+
+# JWT dummy (format 3 segmen b64url). Engine hanya cek keberadaan field token.
+_FAKE_JWT = (
+    "eyJhbGciOiJFZERTQSIsImtpZCI6ImFpby1saWNlbnNlLTIwMjYtMDEifQ"
+    ".eyJqdGkiOiJhaW9tb2QtaG9vay0wMDEiLCJleHAiOjIxNDc0ODM2NDd9"
+    ".QUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUE"
+)
+
+
+def _fake_claim(*a, **k):
+    try:
+        feat = k.get("feature")
+        if feat is None and a:
+            feat = a[0]
+    except Exception:
+        feat = None
+    return {"ok": True, "grant": True, "granted": True, "feature": feat,
+            "token": _FAKE_JWT, "jti": "aiomod-hook-001", "exp": 2147483647,
+            "token_ts": 2147483647, "job_id": "hook-job-0001",
+            "job_hash": (k.get("job_hash") or (a[1] if len(a) > 1 else "0" * 64))}
+
+
+def _fake_token(*a, **k):
+    return {"ok": True, "granted": True, "token": _FAKE_JWT,
+            "jti": "aiomod-hook-001", "exp": 2147483647}
+
+
+def _fake_usage_check(*a, **k):
+    return {"ok": True, "allowed": True, "count": 0, "limit": 999999, "is_vip": True}
+
+
+def _fake_usage_mark(*a, **k):
+    return {"ok": True, "count": 0}
+
+
+def _fake_stamp(*a, **k):
+    return True
+
+
+_CLAIM_PATCH = {}
+for _n in _CLAIM_NAMES:
+    _CLAIM_PATCH[_n] = _fake_token if _n == "_aio_smart_build_token" else _fake_claim
+_CLAIM_PATCH["_aio_stamp_job_claim"] = _fake_stamp
+for _n in _USAGE_NAMES:
+    _CLAIM_PATCH[_n] = _fake_usage_check if _n.endswith("check") else _fake_usage_mark
 
 
 def _force_true(owner, name, out):
@@ -133,10 +218,37 @@ def _force_true(owner, name, out):
         pass
 
 
+def _force_claim(owner, name, out):
+    try:
+        fn = _CLAIM_PATCH.get(name)
+        if fn is not None and hasattr(owner, name):
+            setattr(owner, name, fn)
+            out.append("%s->hook" % name)
+    except Exception:
+        pass
+
+
 def _patch_module(mod, tag):
     out = []
+    t = (tag or "").lower()
+    # Modul crypto/sitecustomize TIDAK boleh di-patch claim: itu modul kita
+    # sendiri / modul palsu, bukan engine. Patch di situ bikin engine asli
+    # tak pernah di-patch (modul masuk 'seen' lebih dulu).
+    _is_engine = ("aio_mod" in t) or ("encoded_ready" in t)
+    _is_crypto = ("cryptography" in t) or ("nacl" in t) or ("sitecustomize" in t)
     for name in _GATE_NAMES:
         _force_true(mod, name, out)
+    if _is_engine and not _is_crypto:
+        for name in _CLAIM_NAMES:
+            before = len(out)
+            _force_claim(mod, name, out)
+            if len(out) > before:
+                out[-1] = "%s->claim" % out[-1].replace("->hook", "")
+        for name in _USAGE_NAMES:
+            before = len(out)
+            _force_claim(mod, name, out)
+            if len(out) > before:
+                out[-1] = "%s->usage" % out[-1].replace("->hook", "")
     for sub in _SUBMODULES:
         submod = getattr(mod, sub, None)
         if submod is not None:
@@ -150,6 +262,41 @@ def _patch_module(mod, tag):
     return out
 
 
+_CLAIM_OWNERS = set()
+
+
+def _apply_claim_only(mod, tag):
+    key = (tag, id(mod))
+    if key in _CLAIM_OWNERS:
+        return
+    out = []
+    for name in list(_CLAIM_NAMES) + list(_USAGE_NAMES):
+        before = len(out)
+        _force_claim(mod, name, out)
+        if len(out) > before:
+            out[-1] = name
+    if out:
+        _CLAIM_OWNERS.add(key)
+        _log(_PATCH_LOG, "[claim] %s -> %s" % (tag, ", ".join(out)))
+
+
+def _find_claim_owner():
+    """Cari modul MANAPUN yang punya _aio_job_claim (persis hook VPS yg terbukti)."""
+    found = []
+    try:
+        for name, mod in list(sys.modules.items()):
+            if mod is None:
+                continue
+            try:
+                if hasattr(mod, "_aio_job_claim"):
+                    found.append((name, mod))
+            except Exception:
+                continue
+    except Exception:
+        pass
+    return found
+
+
 def _watcher():
     seen = set()
     deadline = time.time() + 300
@@ -160,10 +307,25 @@ def _watcher():
                 if mod is None or id(mod) in seen:
                     continue
                 lname = (name or "").lower()
+                is_engine = ("aio_mod" in lname) or ("encoded_ready" in lname)
+                is_crypto = ("cryptography" in lname) or ("nacl" in lname) or \
+                    ("sitecustomize" in lname)
                 has_gate = any(hasattr(mod, g) for g in _GATE_NAMES)
-                if has_gate or ("aio" in lname and ("encoded" in lname or "mod" in lname)):
+                has_claim = any(hasattr(mod, g) for g in _CLAIM_NAMES) or \
+                    any(hasattr(mod, g) for g in _USAGE_NAMES)
+                # Gate VIP boleh di-patch di modul mana pun; gate CLAIM hanya
+                # di modul engine asli (bukan crypto/sitecustomize).
+                if has_gate or (has_claim and is_engine) or is_engine:
                     seen.add(id(mod))
                     _patch_module(mod, name)
+            # RETRY KHUSUS: cari owner _aio_job_claim di modul mana pun,
+            # walau namanya bukan 'aio_mod_encoded_ready'.
+            for _cn, _cm in _find_claim_owner():
+                if ("cryptography" in (_cn or "").lower()) or \
+                   ("nacl" in (_cn or "").lower()) or \
+                   ("sitecustomize" in (_cn or "").lower()):
+                    continue
+                _apply_claim_only(_cm, _cn)
             # dump every aio-ish module once, to see what IS registered
             if not dumped:
                 aio_like = [n for n in list(sys.modules) if "aio" in (n or "").lower()]
