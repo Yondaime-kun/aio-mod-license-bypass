@@ -35,6 +35,16 @@ ENGINE_URL="https://github.com/Yondaime-kun/aio-mod-license-bypass/releases/down
 ENGINE_MD5="785231328c86e8e3e24f8a2c7f149814"
 LIBPY_URL="https://github.com/Yondaime-kun/aio-mod-license-bypass/releases/download/engine-v3.5.2/libpython3.14.so"
 LIBPY_MD5="778aec5978a4f2b47b2fc6f81ad2262f"
+# Binary UPSTREAM (sumber resmi willstore69). Ini self-contained: dia membawa
+# engine-nya sendiri (payload terenkripsi ~12MB di dalam file 13.8MB) dan
+# MEMBACA sitecustomize/site-packages dari PYTHONPATH luar — sehingga bypass
+# kita tetap berlaku. Kunci: file HARUS bernama persis "aio-mod" (binary
+# memeriksa argv[0]; nama lain -> keluar diam-diam tanpa output).
+UPSTREAM_DIR="$HOME_DIR/.aio-patcher/upstream"
+UPSTREAM_BIN="$UPSTREAM_DIR/aio-mod"
+UPSTREAM_API="https://api.github.com/repos/willstore69/toolkit/releases/latest"
+# Fallback statis (kalau API rate-limited / offline): aset release tag "3.5".
+UPSTREAM_URL_FALLBACK="https://github.com/willstore69/toolkit/releases/download/3.5/aio-mod"
 LICENSE_HOST="aio.scwill.store"
 RUN_DIR="$HOME_DIR/.aio-patcher"          # pengganti /opt (tak perlu root)
 SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -298,7 +308,70 @@ patch_dns() {
 }
 
 # =============================================================================
-# STEP 4b — Engine sebenarnya (27MB, decoded)
+# STEP 4a — Binary UPSTREAM (sumber resmi, auto-update)
+# =============================================================================
+# Mengambil binary dari release willstore69/toolkit. Cek API dulu supaya versi
+# baru otomatis kepakai; fallback ke URL tag tetap kalau API gagal. Binary ini
+# self-contained (bawa engine sendiri) dan MEMBACA sitecustomize dari
+# PYTHONPATH luar, jadi patch kita (eddsa/cryptography/sitecustomize) tetap
+# berlaku. WAJIB disimpan dgn nama "aio-mod" — binary memeriksa argv[0].
+patch_upstream() {
+  say "Step 4a/7  Binary upstream (willstore69/toolkit)"
+  mkdir -p "$UPSTREAM_DIR"
+
+  local url="" tag=""
+  # 1. Coba GitHub API utk versi terbaru.
+  local api_json=""
+  if command -v curl >/dev/null 2>&1; then
+    api_json="$(curl -fsSL --max-time 20 "$UPSTREAM_API" 2>/dev/null || true)"
+  elif command -v wget >/dev/null 2>&1; then
+    api_json="$(wget -qO- --timeout=20 "$UPSTREAM_API" 2>/dev/null || true)"
+  fi
+  if [ -n "$api_json" ]; then
+    tag="$(printf '%s' "$api_json" \
+      | grep -o '"tag_name":[[:space:]]*"[^"]*"' | head -1 \
+      | sed 's/.*"tag_name":[[:space:]]*"\([^"]*\)".*/\1/')"
+    url="$(printf '%s' "$api_json" \
+      | grep -o '"browser_download_url":[[:space:]]*"[^"]*/aio-mod"' | head -1 \
+      | sed 's/.*"browser_download_url":[[:space:]]*"\([^"]*\)".*/\1/')"
+  fi
+  [ -n "$url" ] || url="$UPSTREAM_URL_FALLBACK"
+  [ -n "$tag" ] || tag="(fallback)"
+
+  ok "  release upstream: $tag"
+  ok "  url: $url"
+
+  local tmp="$UPSTREAM_BIN.new"
+  rm -f "$tmp"
+  local got=0
+  if command -v curl >/dev/null 2>&1; then
+    curl -fSL --retry 2 --max-time 300 -o "$tmp" "$url" && got=1 || true
+  elif command -v wget >/dev/null 2>&1; then
+    wget -q -O "$tmp" "$url" && got=1 || true
+  fi
+
+  # Sanity: harus ELF aarch64 & ukuran wajar (>10MB). Kalau gagal dan sudah ada
+  # binary lama, pertahankan yg lama (jangan rusak instalasi yg jalan).
+  if [ "$got" = 1 ] && [ -s "$tmp" ] && [ "$(stat -c%s "$tmp" 2>/dev/null || echo 0)" -gt 10000000 ]; then
+    mv -f "$tmp" "$UPSTREAM_BIN"
+    chmod 755 "$UPSTREAM_BIN"
+    ok "  upstream terpasang: $UPSTREAM_BIN ($(stat -c%s "$UPSTREAM_BIN") bytes)"
+  else
+    rm -f "$tmp"
+    if [ -s "$UPSTREAM_BIN" ]; then
+      warn "  unduh upstream gagal — pakai yg sudah ada ($(stat -c%s "$UPSTREAM_BIN") bytes)"
+    else
+      warn "  unduh upstream gagal — runner akan pakai engine 27MB sbg fallback"
+    fi
+  fi
+  # Simpan versi yg kepakai (utk pesan & audit).
+  printf 'tag=%s\nurl=%s\nmd5=%s\n' "$tag" "$url" \
+    "$(md5sum "$UPSTREAM_BIN" 2>/dev/null | cut -d' ' -f1)" \
+    > "$UPSTREAM_DIR/version.txt" 2>/dev/null || true
+}
+
+# =============================================================================
+# STEP 4b — Engine sebenarnya (27MB, decoded) — FALLBACK
 # =============================================================================
 # 'aio-mod' yg di-download dari upstream (13.8MB) adalah INSTALLER/launcher:
 # ia mengunduh & men-decode engine asli ke $HOME/release lalu menjalankannya.
@@ -587,10 +660,30 @@ SP="${SP:-$PREFIX/lib/python3.14/site-packages}"
 cd "$RELEASE_DIR" 2>/dev/null || cd "$HOME" 2>/dev/null || true
 export PYTHONPATH="$RELEASE_DIR:$SP${PYTHONPATH:+:$PYTHONPATH}"
 export COLUMNS="${COLUMNS:-80}"
-# Jalankan engine 27MB dari $ENGINE_DIR (bukan launcher 13.8MB di release/).
-ENGINE_BIN="$ENGINE_DIR/aio-mod-engine"
-[ -x "\$ENGINE_BIN" ] || ENGINE_BIN="$RELEASE_DIR/aio-mod"
-"\$ENGINE_BIN" "\$@"
+# PRIORITAS 1: binary UPSTREAM (sumber resmi, auto-update). Dia self-contained
+# (bawa engine sendiri) dan membaca patch kita lewat PYTHONPATH di atas.
+# WAJIB path berakhiran "/aio-mod" — binary memeriksa argv[0]; nama lain
+# membuatnya keluar diam-diam tanpa output.
+UPSTREAM_BIN="\$RUN_DIR/upstream/aio-mod"
+# PRIORITAS 2 (fallback): engine 27MB hasil decode.
+ENGINE_BIN="\$RUN_DIR/engine/aio-mod-engine"
+if [ -x "\$UPSTREAM_BIN" ]; then
+  RUN_BIN="\$UPSTREAM_BIN"
+elif [ -x "\$ENGINE_BIN" ]; then
+  RUN_BIN="\$ENGINE_BIN"
+elif [ -x "$RELEASE_DIR/aio-mod" ]; then
+  RUN_BIN="$RELEASE_DIR/aio-mod"
+else
+  echo "binary tak ditemukan (upstream/engine). Jalankan: patch.sh install" >&2
+  exit 1
+fi
+# Engine 27MB dynamic butuh libpython VERSI KHUSUS + libandroid-support;
+# binary upstream self-contained tidak butuh apa pun.
+case "\$RUN_BIN" in
+  *"/engine/"*) export LD_LIBRARY_PATH="\$RUN_DIR/engine:$PREFIX/lib\${LD_LIBRARY_PATH:+:\$LD_LIBRARY_PATH}" ;;
+esac
+cd "\$RUN_DIR/upstream" 2>/dev/null || cd "$RELEASE_DIR" 2>/dev/null || cd "$HOME_DIR" 2>/dev/null || true
+exec "\$RUN_BIN" "\$@"
 EOF
   chmod +x "$PREFIX/bin/aio"
   ok "  $PREFIX/bin/aio siap (jalankan: aio)"
@@ -653,6 +746,13 @@ PY
                   || warn "  dependency engine kurang ($dm/5) — engine bisa stuck saat setup"
   pgrep -f "$RUN_DIR/fakelicstls.py" >/dev/null && ok "  fake TLS server aktif" || { err "  fake server mati"; fail=1; }
   [ -x "$PREFIX/bin/aio" ] && ok "  runner 'aio' ok" || { err "  runner hilang"; fail=1; }
+  # Binary upstream (sumber resmi, auto-update) — jalur utama runner.
+  if [ -x "$UPSTREAM_BIN" ]; then
+    ok "  upstream binary ok ($(stat -c%s "$UPSTREAM_BIN" 2>/dev/null) bytes)"
+    [ -f "$UPSTREAM_DIR/version.txt" ] && ok "    $(tr '\n' ' ' < "$UPSTREAM_DIR/version.txt")"
+  else
+    warn "  upstream binary belum ada — runner pakai engine 27MB (jalankan: ./patch.sh update)"
+  fi
   [ -d "$RELEASE_DIR" ] && ok "  release dir ok" || warn "  release dir belum ada: $RELEASE_DIR"
   echo
   if [ "$fail" = 0 ]; then
@@ -680,6 +780,7 @@ do_revert() {
   [ -e "$PREFIX/etc/tls/cert.pem.asli" ] && { mv "$PREFIX/etc/tls/cert.pem.asli" "$PREFIX/etc/tls/cert.pem"; ok "  restore tls cert.pem"; }
   pkill -f "$RUN_DIR/fakelicstls.py" 2>/dev/null || true
   rm -f "$PREFIX/bin/aio" "$RUN_DIR/fakelicstls.py"
+  rm -rf "$RUN_DIR/upstream" 2>/dev/null || true
   ok "  revert selesai"
 }
 
@@ -694,6 +795,7 @@ case "${1:-install}" in
     patch_apt_shim
     patch_sentinel
     patch_ca
+    patch_upstream
     patch_engine
     patch_deps
     patch_dns
@@ -702,7 +804,14 @@ case "${1:-install}" in
     patch_runner
     do_verify
     ;;
+  update)
+    echo -e "${C_C}╔══════════════════════════════════════════════╗"
+    echo -e "║  AIO-MOD UPDATE — ambil binary upstream baru ║"
+    echo -e "╚══════════════════════════════════════════════╝${C_R}"
+    patch_upstream
+    ok "  Jalankan:  aio"
+    ;;
   verify) do_verify ;;
   revert) do_revert ;;
-  *) echo "usage: $0 [install|verify|revert]"; exit 1 ;;
+  *) echo "usage: $0 [install|update|verify|revert]"; exit 1 ;;
 esac
