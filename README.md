@@ -1,114 +1,40 @@
-# AIO-MOD Toolkit v3.5.2 — license bypass
+# AIO-MOD Toolkit 3.5.2: license bypass
 
-Reverse-engineering write-up + patcher untuk **AIO-MOD Toolkit v3.5.2**
-(release `willstore69/toolkit`), engine Python ter-*compile* Nuitka
-(CPython 3.14, aarch64/Android-Termux) dengan license wall Ed25519.
+Patcher untuk menjalankan **AIO-MOD Toolkit 3.5.2** tanpa lisensi server.
 
-Hasil: engine jalan di mode **`★ VIP MEMBER ★`** (18 menu), **tanpa** mengirim
-HWID ke server asli.
+Engine-nya binary Nuitka (CPython 3.14, aarch64). Setelah dipatch, engine jalan
+di mode VIP dengan 18 menu aktif, dan tidak mengirim HWID ke server asli.
 
-> Riset keamanan pada perangkat/lingkungan sendiri.
+Dua target didukung: **Linux x86_64** (via qemu) dan **Termux/Android aarch64**
+(native). Setiap platform punya patcher sendiri supaya satu tidak merusak yang
+lain.
 
----
+## Yang sudah diuji
 
-## Status tested
-
-| Platform | Versi | Status | Cara redirect |
+| Platform | Versi OS | Hasil | Catatan |
 |---|---|---|---|
-| **Linux x86_64** (Ubuntu 24.04.5 LTS, kernel 6.8.0-101) | — | ✅ **VIP** | `/etc/hosts` + `fakelics.service` (systemd) + qemu-aarch64 |
-| **Linux x86_64** (Ubuntu 22.04.5 LTS, kontainer **tanpa systemd**) | — | ✅ **VIP** | `/etc/hosts` + fake server via **nohup** + qemu-aarch64 |
-| **Termux aarch64** (Android 12 ARM64 native, container redroid) | Python 3.14.6 | ✅ **VIP + Smali Patcher** | shim `sitecustomize` + hook `[Job/Claim]` + fake TLS :8443 |
-| **Termux aarch64** (HP fisik user, **non-root**) | Python 3.14.x | ✅ **VIP** | shim `sitecustomize` + fake `cryptography` ed25519 |
+| Linux x86_64, systemd | Ubuntu 24.04.5 | VIP | `/etc/hosts` + service systemd |
+| Linux x86_64, tanpa systemd | Ubuntu 22.04.5 | VIP | `/etc/hosts` + fake server nohup |
+| Termux aarch64 | Android 12 (Python 3.14.6) | VIP + Smali Patcher | non-root, hook runtime |
+| Termux aarch64, HP fisik | Android, Python 3.14.x | VIP | non-root |
 
-**Status per platform (jujur):**
+Cara uji tiap platform berbeda, jadi detailnya ada di README masing-masing:
+[`linux/README.md`](linux/README.md) dan [`termux/README.md`](termux/README.md).
 
-- **Linux x86_64**: terbukti VIP, **dari lingkungan bersih** — `git clone` →
-  `bootstrap.sh` → `aio`. Bootstrap otomatis mengunduh engine 27MB + libpython
-  yang cocok dari GitHub Release repo ini, menyiapkan fake Termux FS, qemu,
-  fake TLS server, runner, dan redirect. Diuji di dua VPS berbeda (satu dengan
-  systemd, satu kontainer tanpa systemd).
-- **Termux aarch64 (Android 12 ARM64)**: **VIP tercapai**, terverifikasi ulang
-  dari nol (`patch.sh revert` → `install` → `aio` → `★ VIP MEMBER ★`),
-  tanpa langkah manual. Engine 27MB dijalankan **native** (tanpa qemu).
-  Penyebab lama "Gratis" sudah ditemukan & diperbaiki: (1) fake
-  `Crypto.Signature.eddsa` **tidak benar-benar terpasang** (kalah oleh `.pyc`/
-  `.pyi`); (2) CA palsu tidak ada di `certifi/cacert.pem`; (3) dependency engine
-  belum lengkap; (4) `LD_LIBRARY_PATH=/system/lib64` merusak link di Termux.
-- **Termux di HP fisik (non-root)**: ✅ **VIP — TERKONFIRMASI user**
-  ("Finally vip"). Akar masalah yang dulu bikin selalu Gratis: paket
-  **`cryptography`** terpasang → engine memilih verifier **Rust**
-  (`Ed25519PublicKey.verify()`) dan **mengabaikan** fake
-  `Crypto.Signature.eddsa`. Fix = fake `cryptography/hazmat/primitives/
-  asymmetric/ed25519.py` (`verify()` no-op), terpasang otomatis oleh
-  `patch.sh install` (Step 1b). Detail: `FINDINGS.md` §3.
+## Cara pakai
 
-### Lapis kedua: `[Job/Claim]` (tool tertentu)
+### Linux / VPS
 
-VIP **tidak** otomatis membuka semua tool. Sebagian tool (Patcher Smali, dll)
-memanggil endpoint kedua `POST /v1/job/claim` dan gagal dengan:
-
-```
-× GALAT   [Job/Claim] Server menolak claim SSL_PINNING_BYPASS (bukan VIP / offline).
-```
-
-Gate ini **client-side** dan sudah **terbukti dilewati end-to-end** lewat
-**runtime monkeypatch** 7 fungsi engine (`_aio_job_claim`,
-`_aio_stamp_job_claim`, `_aio_special_claim_apk`, `_aio_smart_build_token`,
-`_aio_server_usage_check`, `_aio_server_usage_mark`, `_require_vip_feature`).
-
-Hasil tes dgn APK asli (F-Droid 11.9 MB): engine memproses 2 DEX, menjalankan
-patch, repack, zipalign, preserve V1/V2/V3 → **keluaran APK valid**
-(11.9 MB). Log hook: `_aio_job_claim HOOKED args=('SSL_PINNING_BYPASS', …)`.
-Error `[Job/Claim] Server menolak claim` tidak muncul sama sekali.
-
-Catatan: hook hanya aktif kalau stdin **bukan** tty (di VPS dijalankan via
-subprocess + steering file). Detail: `FINDINGS.md` §5 & §9, `WALKTHROUGH.md`
-bagian *Gerbang kedua*.
-
----
-
-## Dua varian patcher (TERPISAH per platform)
-
-Kerja di satu platform **tidak mengganggu** yang lain:
-
-| Platform | Folder | Root? | Redirect server |
-|---|---|---|---|
-| **Termux (Android)** | `termux/` | ❌ non-root | shim Python (`sitecustomize`) |
-| **Linux / VPS (x86_64)** | `linux/` | ✅ sudo | `/etc/hosts` + systemd/nohup |
-| Komponen bersama | `shared/` | — | fake TLS server + certs |
-
-## Prinsip kerja
-
-1. Engine sebenarnya adalah **file 27 MB** yang di-decode (dynamic aarch64),
-   **bukan** file `aio-mod` 13.8 MB yang diunduh dari release upstream — yang
-   terakhir itu **launcher/installer** dan gagal mengunduh/decode engine di
-   banyak lingkungan. Patcher ini mengunduh engine 27 MB langsung dari
-   **GitHub Release repo ini** (`aio-mod-engine`, md5 `785231328c…`) dan
-   menyertakan lib yang cocok (`libpython3.14.so`, `libandroid-support.so`).
-2. **Fake license server** (`shared/fakelicstls.py`) membalas
-   `POST /v1/device/check` dengan JSON `{"ok":true,"is_vip":true, ...}`.
-   Field `req_nonce` **wajib** sama dengan header `X-Req-Nonce` yang dikirim
-   engine, kalau tidak engine menolak (*"Tanda tangan respons server tidak
-   valid"*). Dijalankan dengan Python bernacl kalau tersedia (kalau tidak,
-   `ed25519_sig` dummy tetap diterima engine — engine hanya mengecek
-   keberadaan field itu).
-3. Engine menghubungi `aio.scwill.store:8443` → diarahkan ke `127.0.0.1`.
-4. Fake `Crypto/Cryptodome.Signature.eddsa` dipasang sebagai lapisan tambahan
-   (di engine versi ini verifikasi sebenarnya inline, jadi ini opsional).
-
-## Pakai
-
-### Linux / VPS (sudo)
 ```bash
-sudo apt install qemu-user-static binutils curl unzip   # python3-pynacl opsional
+sudo apt install qemu-user-static binutils curl unzip
 git clone https://github.com/Yondaime-kun/aio-mod-license-bypass.git
 cd aio-mod-license-bypass/linux
 sudo ./bootstrap.sh
 sudo aio
 ```
-Detail: [`linux/README.md`](linux/README.md)
 
-### Termux (non-root) — TANPA sudo
+### Termux (non-root)
+
 ```bash
 pkg install git
 git clone https://github.com/Yondaime-kun/aio-mod-license-bypass.git
@@ -117,54 +43,114 @@ cd aio-mod-license-bypass/termux
 aio
 ```
 
-> **Penting (mode hook `[Job/Claim]`):** tool lapis-2 (Smali Patcher dll) butuh
-> `sitecustomize` (hook claim) **dimuat**, dan itu hanya terjadi kalau **stdin
-> engine bukan tty**. Karena shell Termux = tty, jalankan dengan wrapper:
-> ```bash
-> AIO_HOOK=1 aio     # <-- pakai ini untuk tool yang kena [Job/Claim]
-> ```
-> `AIO_HOOK=1` menjalankan engine lewat `aio-session.py` (relay I/O via pipe)
-> sehingga hook claim ke-load dan `[Job/Claim] Server menolak claim` hilang.
+Untuk tool yang kena gate kedua, pakai `AIO_HOOK=1 aio`. Lihat bagian
+[Gerbang kedua](#gerbang-kedua-jobclaim) di bawah.
 
-> **Setup dependency Termux (kalau fresh install):**
-> ```bash
-> pkg install -y zip p7zip aapt openjdk-17 clang python-pycryptodomex python-cryptography
-> pip install certifi requests
-> ```
-> - `python-pycryptodomex` (BUKAN `python-pycryptodome` — beda nama di repo Termux)
-> - `certifi` + `requests` tidak ada di repo Termux → via `pip`
-> - **DNS container/HP blokir**: kalau `pkg`/`pip` gagal resolve, hardcode
->   `/etc/hosts` (butuh root) atau andalkan mirror yang jalan.
-> - **CA palsu harus di-append ke `certifi/cacert.pem`** — engine memakai
->   certifi, bukan `/etc/tls/`. Patcher melakukannya otomatis (Step 3b).
+## Cara kerjanya
 
-> Termux Android 12 ARM64 **sudah VIP + tool Smali Patcher jalan** (lihat
-> *Status tested*). Di HP fisik, patcher memilih jalur otomatis (non-root).
-> Detail: [`termux/README.md`](termux/README.md)
+Engine aslinya bukan file `aio-mod` 13.8 MB dari upstream. File itu hanya
+launcher, dan sering gagal decode engine di banyak lingkungan. Engine
+sebenarnya adalah binary aarch64 27 MB hasil decode.
+
+Patcher ini melakukan tiga hal:
+
+1. Unduh engine 27 MB dari GitHub Release repo ini (tag `engine-v3.5.2`),
+   verifikasi md5 (`785231328c…`), lalu pasang bersama lib yang cocok
+   (`libpython3.14.so`, `libandroid-support.so`).
+2. Jalankan fake license server yang membalas `POST /v1/device/check` dengan
+   JSON VIP. `aio.scwill.store` diarahkan ke `127.0.0.1`.
+3. Pasang fake verifier Ed25519 supaya tanda tangan license palsu bisa lolos.
+
+Engine memilih backend kripto secara adaptif. Kalau paket `cryptography` ada,
+ia memverifikasi lewat `Ed25519PublicKey.verify()` (implementasi Rust di
+OpenSSL), bukan modul `Crypto.Signature.eddsa`. Artinya fake `eddsa.py` saja
+tidak cukup. Patcher ini juga menimpa `cryptography/hazmat/primitives/
+asymmetric/ed25519.py` supaya `verify()` jadi no-op.
+
+## Gerbang kedua: `[Job/Claim]`
+
+VIP tidak otomatis membuka semua tool. Sebagian tool, misalnya Smali Patcher,
+memanggil endpoint kedua `POST /v1/job/claim`. Kalau gagal, hasilnya:
+
+```
+× GALAT   [Job/Claim] Server menolak claim SSL_PINNING_BYPASS (bukan VIP / offline).
+```
+
+Gate ini berjalan di sisi client. Bypass-nya lewat runtime monkeypatch fungsi
+claim di engine: `_aio_job_claim`, `_aio_stamp_job_claim`,
+`_aio_special_claim_apk`, `_aio_smart_build_token`, dan dua fungsi usage.
+
+Dengan APK asli (F-Droid 11.9 MB), hasilnya engine memproses dua file DEX,
+menjalankan patch, repack, zipalign, dan mempertahankan blok tanda tangan
+V1/V2/V3. Keluarannya APK valid.
+
+Satu syarat: hook hanya dimuat kalau stdin engine bukan tty. Di Linux ini
+terjadi otomatis (systemd atau pipe). Di Termux, shell selalu tty, jadi pakai:
+
+```bash
+AIO_HOOK=1 aio
+```
+
+Mode itu menjalankan engine lewat `aio-session.py` yang memakai pipe, sehingga
+hook dimuat dan tidak dimuat saat tty.
+
+## Dependency Termux
+
+Kalau install dari nol:
+
+```bash
+pkg install -y zip p7zip aapt openjdk-17 clang \
+  python-pycryptodomex python-cryptography openssl-tool
+pip install certifi requests
+```
+
+Beberapa catatan yang sudah kejadian di lapangan:
+
+- Nama paketnya `python-pycryptodomex`, bukan `python-pycryptodome`.
+- `certifi` dan `requests` tidak ada di repo Termux. Install lewat pip.
+- `openssl-tool` berisi binary `openssl`. Paket `openssl` hanya library, tanpa
+  binary, dan patcher butuh binary-nya.
+- CA palsu harus ditambahkan ke `certifi/cacert.pem`, karena engine memakai
+  certifi, bukan `/etc/tls/`. Patcher melakukannya otomatis.
 
 ## Troubleshooting
 
-| Gejala | Penyebab / cek |
+| Gejala | Penyebab |
 |---|---|
-| `[ Gratis PENGGUNA ]` + `Koneksi Gagal` | fake server hidup? `pgrep -f fakelicstls` |
-| `Tanda tangan respons server tidak valid` (dengan `eddsa_hook.log` kosong) | **paket `cryptography` ada** → engine pakai verifier Rust → `./patch.sh install` (Step 1b) |
-| `Tanda tangan respons server tidak valid` (lainnya) | fake `eddsa.py` **tidak benar-benar terpasang** (`.pyc`/`.pyi` menang) → `./patch.sh install` |
-| `TLSV1_ALERT_UNKNOWN_CA` di log fake server | CA palsu belum masuk `certifi/cacert.pem` |
-| Engine berhenti di `Sync resource toolkit...` | dependency kurang → `pkg install zip unzip p7zip aapt openjdk-17 clang` |
-| `library "libpython3.14.so" not found` (Termux native) | `LD_LIBRARY_PATH` salah — JANGAN pakai `/system/lib64` di Termux |
-| `library "libpython3.14.so" not found` (Linux) | lib dari release belum terpasang di `/system/lib64` (Linux) |
-| `library "libandroid-support.so" not found` | `libandroid-support.so` belum ada di samping libpython |
-| `pkg install` → `apt ... required file not found` | shim apt menimpa paket apt → `cp -f $PREFIX/bin/apt.asli $PREFIX/bin/apt` |
-| `ModuleNotFoundError: certifi` / `requests` | `pip install certifi requests` (tidak ada di repo Termux) |
-| `No module named '_cffi_backend'` (PyNaCl) | PyNaCl butuh cffi; fake server kini fallback ke `cryptography` — tak wajib |
-| `[Job/Claim] Server menolak claim …` | jalankan dengan **`AIO_HOOK=1 aio`** (hook claim butuh stdin non-tty) |
-| Loading bar numpuk newline | bar 92 char > lebar layar → `COLUMNS=80` / perkecil font |
+| `[ Gratis PENGGUNA ]` + `Koneksi Gagal` | fake server tidak jalan. Cek `pgrep -f fakelicstls`. |
+| `Tanda tangan respons server tidak valid`, `eddsa_hook.log` kosong | paket `cryptography` terpasang, engine pakai verifier Rust. Jalankan `./patch.sh install`. |
+| `Tanda tangan respons server tidak valid` | fake `eddsa.py` tidak benar-benar terpasang, kalah oleh `.pyc` atau `.pyi`. |
+| `TLSV1_ALERT_UNKNOWN_CA` di log fake server | CA palsu belum masuk `certifi/cacert.pem`. |
+| Engine berhenti di `Sync resource toolkit...` | dependency kurang. Lihat bagian Dependency Termux. |
+| `library "libpython3.14.so" not found` di Termux | `LD_LIBRARY_PATH` salah. Jangan pakai `/system/lib64` di Termux. |
+| `ModuleNotFoundError: certifi` atau `requests` | `pip install certifi requests`. |
+| `No module named '_cffi_backend'` | PyNaCl butuh cffi. Tidak wajib, fake server sekarang fallback ke `cryptography`. |
+| `[Job/Claim] Server menolak claim` | jalankan dengan `AIO_HOOK=1 aio`. |
+| Loading bar menumpuk newline | bar 92 kolom lebih lebar dari layar. Set `COLUMNS=80` atau perkecil font. |
 
 ## Struktur
+
 ```
-├── termux/       patcher non-root (Android)
-├── linux/        patcher sudo (systemd/nohup + qemu)
-├── shared/       fake TLS server + certs
-├── FINDINGS.md   catatan RE
-└── WALKTHROUGH.md
+termux/         patcher non-root (Android, native)
+  bootstrap.sh    pemasang
+  patch.sh        install / verify / revert
+  files/          sitecustomize hook, wrapper, fake crypto
+linux/          patcher sudo (systemd atau nohup, qemu)
+shared/         fake TLS server + cert
+FINDINGS.md     catatan reverse engineering
+WALKTHROUGH.md  langkah analisis
 ```
+
+## Batasan
+
+- Menu Native Protector (`[10]`) belum jalan. Tool itu butuh compiler broker
+  di server mereka, bukan sekadar gate lokal. Anda perlu kredensial `aioc_`
+  asli untuk itu.
+- Bypass ini bekerja di sisi client. Semua token yang dihasilkan palsu, dan
+  hanya berlaku lokal.
+
+## Konteks
+
+Riset keamanan pada perangkat dan lingkungan sendiri, untuk memahami bagaimana
+license gate pada binary Nuitka bekerja dan bagaimana verifikasi client-side
+bisa dilewati. Catatan teknis lengkap ada di `FINDINGS.md`.

@@ -1,20 +1,20 @@
-# Termux (Android) — patcher NATIVE (aarch64)
+# Termux (Android): patcher NATIVE (aarch64)
 
 Bypass AIO-MOD Toolkit langsung di **Termux asli** (Android ARM64), tanpa emulasi.
-Engine 27MB (Nuitka, ARM aarch64) dijalankan native pakai bionic Android —
+Engine 27MB (Nuitka, ARM aarch64) dijalankan native pakai bionic Android -
 jauh lebih cepat daripada qemu di Linux.
 
 ## Status tested (jujur)
 
 | Platform | Versi | Hasil |
 |---|---|---|
-| **Termux di Android 12 ARM64** (container redroid, fingerprint realme RMX3615) | Python 3.14.6, aarch64, SDK 31 | ✅ **★ VIP MEMBER ★** + `✓ BERHASIL Akses Diterima!` |
-| Termux di **HP fisik** (non-root, Android 12/13) | — | ⚠️ **belum diuji di HP fisik**; struktur sama, 2 hal beda & sudah ditangani otomatis (lihat di bawah) |
+| **Termux di Android 12 ARM64** (container redroid, fingerprint realme RMX3615) | Python 3.14.6, aarch64, SDK 31 | ✅ **★ VIP MEMBER ★** + Smali Patcher |
+| **Termux di HP fisik** (non-root, Android 12/13) | Python 3.14.x | ✅ **★ VIP MEMBER ★** |
 
 Yang **sudah terbukti**: `patch.sh install` selesai tanpa gagal, `aio` masuk
 menu, banner `★ VIP MEMBER ★`.
 
-**Perbedaan yang diharapkan di HP fisik (non-root)** — patcher menanganinya:
+**Perbedaan yang diharapkan di HP fisik (non-root)**, ditangani otomatis oleh patcher:
 - `iptables` tidak tersedia/tidak diizinkan → dialihkan ke redirect socket
   `sitecustomize`; kalau engine tetap Gratis, blokir IP license dari luar Termux.
 - `/etc/hosts` tidak bisa ditulis → sama, dialihkan ke `sitecustomize`.
@@ -44,12 +44,12 @@ pkg install -y apt
 ./diagnose.sh
 ```
 
-Urutan cek — **urutan penyebab yang terbukti di lapangan**, dari yang paling sering:
+Urutan cek berikut **urutan penyebab yang terbukti di lapangan**, dari yang paling sering:
 
 0. **Paket `cryptography` terpasang.** **INI PENYEBAB #1 di HP fisik.** Engine memilih
    backend verifikasi secara adaptif: kalau `cryptography` ada, ia memakai
    `cryptography.hazmat...Ed25519PublicKey.verify()` (implementasi RUST) dan
-   **mengabaikan `Crypto.Signature.eddsa`** — jadi fake eddsa tak berpengaruh →
+   **mengabaikan `Crypto.Signature.eddsa`**, jadi fake eddsa tak berpengaruh →
    `× GALAT Tanda tangan respons server tidak valid` → `[ Gratis PENGGUNA ]`.
    Gejala khas: `~/.aio-patcher/eddsa_hook.log` **tidak pernah dibuat** walau
    `Crypto/Signature/eddsa.py` sudah fake. Cek & perbaiki:
@@ -135,12 +135,12 @@ Urutan cek — **urutan penyebab yang terbukti di lapangan**, dari yang paling s
 ./diagnose.sh
 ```
 
-Patcher **idempotent** — aman diulang. File yang di-patch di-backup `.asli`.
+Patcher **idempotent**, aman diulang. File yang di-patch di-backup `.asli`.
 
 ## Update ke versi baru (auto)
 
 Jalur utama `aio` sekarang adalah **binary resmi dari `willstore69/toolkit`**
-yang diunduh otomatis — bukan engine dari repo ini.
+yang diunduh otomatis, bukan engine dari repo ini.
 
 ```bash
 ./patch.sh update     # ambil binary upstream versi terbaru
@@ -152,11 +152,11 @@ Cara kerja:
 1. Cek GitHub API `willstore69/toolkit/releases/latest` → ambil URL aset
    `aio-mod`. Kalau API gagal (rate limit/offline), fallback ke tag tetap `3.5`.
 2. Binary disimpan sebagai `~/.aio-patcher/upstream/aio-mod`. **Nama file WAJIB
-   `aio-mod`** — binary memeriksa `argv[0]`; nama lain membuatnya keluar
+   `aio-mod`**; binary memeriksa `argv[0]`, nama lain membuatnya keluar
    diam-diam tanpa output (gejala: `EXIT=0` tanpa teks apa pun).
 3. Runner `aio` memprioritaskan binary upstream; engine 27MB hanya fallback.
 
-**Kenapa bisa:** binary `aio-mod` upstream *self-contained* — membawa engine-nya
+**Kenapa bisa:** binary `aio-mod` upstream *self-contained*, membawa engine-nya
 sendiri (payload terenkripsi ±12 MB di dalam file 13.8 MB) **dan tetap membaca
 `sitecustomize.py` + `site-packages` dari `PYTHONPATH` luar**. Terbukti: dengan
 `PYTHONPATH` → sitecustomize kita ke-load; tanpa → tidak. Jadi patch kita
