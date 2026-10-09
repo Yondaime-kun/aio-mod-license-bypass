@@ -2,6 +2,10 @@
 
 **Status:** TEMBUS — engine jalan di mode `★ VIP MEMBER ★`, 18 menu kebuka.
 
+> ℹ️ **Update 2026-10-09:** VIP sudah selesai. Sekarang ada temuan lapis
+> **kedua** (`[Job/Claim]`) untuk tool tertentu, plus cara melewatinya.
+> Lihat bagian **[Gerbang kedua: /v1/job/claim]** dan **[Update 2026-10-09]**.
+
 Bypass menyasar license wall Ed25519 *fail-closed* tanpa menyentuh kode native
 engine: engine (Nuitka, CPython 3.14 aarch64) **tetap meng-import
 `Crypto.Signature.eddsa` dari site-packages Termux** saat verifikasi. Kita ganti
@@ -9,6 +13,79 @@ modul itu dengan verifier palsu, plus fake TLS license server untuk melewati
 cert-pin.
 
 > Hanya untuk lingkungan lab/uji milik sendiri.
+
+---
+
+## Update 2026-10-09 (penting)
+
+### Fix VIP di HP fisik user (non-root Termux)
+
+Gejala: fake eddsa terpasang tapi engine tetap **Gratis**. Akar masalah:
+**backend verifikasi engine ADAPTIF** —
+
+| `cryptography` ada? | Verifier dipakai | Fake eddsa | Hasil |
+|---|---|---|---|
+| tidak | `Crypto.Signature.eddsa` | kepakai | VIP |
+| **ya** | `cryptography.hazmat...Ed25519PublicKey.verify()` (Rust) | **tidak kepakai** | Gratis |
+
+HP user punya paket `cryptography` → engine pakai verifier Rust, fake eddsa
+diabaikan. **Fix:** fake `cryptography/hazmat/primitives/asymmetric/ed25519.py`
+(`verify()` no-op). Terbukti → **VIP** di HP user (commit `0f48591`).
+
+### Auto-update dari binary upstream
+
+Upstream `aio-mod` (13.86 MB, md5 `04ac3a7a`, dari
+`github.com/willstore69/toolkit/releases/download/3.5/aio-mod`) itu
+**SELF-CONTAINED** dan **membaca `sitecustomize.py` dari `PYTHONPATH` luar** —
+artinya patcher bisa jalan tanpa engine 27 MB kita. WAJIB bernama `aio-mod`
+(cek `argv[0]`; nama lain → exit diam). Mode: `patch.sh update` (`fbd9c8f`).
+
+---
+
+## Gerbang kedua: `POST /v1/job/claim`
+
+Setelah VIP, sebagian tool (Patcher Smali, dll) mengecek endpoint **kedua**:
+
+```
+× GALAT   [Job/Claim] Server menolak claim SSL_PINNING_BYPASS (bukan VIP / offline).
+```
+
+**Tiga lapis otentikasi:**
+
+| Lapis | Endpoint | Cara lewat |
+|---|---|---|
+| 1 | `/v1/device/check` | fake TLS server + CA |
+| 2 | `/v1/job/claim` | **runtime hook** (client-side) |
+| 3 | `/v1/smart/token`, `/v1/special/claim`, `/v1/usage/check`, `/v1/usage/mark`, `/v1/free/verify`, `/v1/compiler/bootstrap` | runtime hook |
+
+Request claim: `{"feature","hwid","job_hash","request_id"}` — `job_hash` konstan
+per APK, `request_id` random. Respons **wajib ber-signature**; brute-force 11
+skema respons ke fake server **gagal semua**. Jalan keluarnya bukan fake server,
+tapi **monkeypatch fungsi Python engine** (lapis 2 & 3 murni client-side).
+
+### Cara hook yang terbukti
+
+Engine memuat `sitecustomize.py` dari `PYTHONPATH` **hanya kalau stdin bukan tty**:
+
+| stdin | sitecustomize |
+|---|---|
+| pipe / `/dev/null` | **KE-LOAD** ✅ |
+| tty (tmux / HP) | tidak ke-load ❌ |
+
+7 fungsi yang di-patch (semua sukses):
+```
+_aio_job_claim, _aio_stamp_job_claim, _aio_special_claim_apk,
+_aio_smart_build_token, _aio_server_usage_check, _aio_server_usage_mark,
+_require_vip_feature
+```
+
+Cari modul lewat atribut (`hasattr(mod,"_aio_job_claim")`), **bukan** lewat nama —
+engine tidak selalu mendaftar sebagai `aio_mod_encoded_ready`.
+
+**Hasil:** error `Server menolak claim` **hilang**; engine lanjut ke patch smali
+(pada APK dummy → error Java parsing biasa, bukan lagi gate claim).
+
+Detail lengkap: `FINDINGS.md` §5.
 
 ---
 
