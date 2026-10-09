@@ -17,7 +17,7 @@ HWID ke server asli.
 |---|---|---|---|
 | **Linux x86_64** (Ubuntu 24.04.5 LTS, kernel 6.8.0-101) | — | ✅ **VIP** | `/etc/hosts` + `fakelics.service` (systemd) + qemu-aarch64 |
 | **Linux x86_64** (Ubuntu 22.04.5 LTS, kontainer **tanpa systemd**) | — | ✅ **VIP** | `/etc/hosts` + fake server via **nohup** + qemu-aarch64 |
-| **Termux aarch64** (Android 12 ARM64 native, container redroid) | Python 3.14.6 | ✅ **VIP** | shim `sitecustomize` + `iptables` REJECT IP license |
+| **Termux aarch64** (Android 12 ARM64 native, container redroid) | Python 3.14.6 | ✅ **VIP + Smali Patcher** | shim `sitecustomize` + hook `[Job/Claim]` + fake TLS :8443 |
 | **Termux aarch64** (HP fisik user, **non-root**) | Python 3.14.x | ✅ **VIP** | shim `sitecustomize` + fake `cryptography` ed25519 |
 
 **Status per platform (jujur):**
@@ -116,9 +116,30 @@ cd aio-mod-license-bypass/termux
 ./bootstrap.sh
 aio
 ```
-> Termux Android 12 ARM64 **sudah VIP** (lihat *Status tested*). Di HP fisik,
-> patcher memilih jalur otomatis (non-root) — kalau masih Gratis, lihat
-> [`termux/README.md`](termux/README.md) bagian "Kalau masih Gratis".
+
+> **Penting (mode hook `[Job/Claim]`):** tool lapis-2 (Smali Patcher dll) butuh
+> `sitecustomize` (hook claim) **dimuat**, dan itu hanya terjadi kalau **stdin
+> engine bukan tty**. Karena shell Termux = tty, jalankan dengan wrapper:
+> ```bash
+> AIO_HOOK=1 aio     # <-- pakai ini untuk tool yang kena [Job/Claim]
+> ```
+> `AIO_HOOK=1` menjalankan engine lewat `aio-session.py` (relay I/O via pipe)
+> sehingga hook claim ke-load dan `[Job/Claim] Server menolak claim` hilang.
+
+> **Setup dependency Termux (kalau fresh install):**
+> ```bash
+> pkg install -y zip p7zip aapt openjdk-17 clang python-pycryptodomex python-cryptography
+> pip install certifi requests
+> ```
+> - `python-pycryptodomex` (BUKAN `python-pycryptodome` — beda nama di repo Termux)
+> - `certifi` + `requests` tidak ada di repo Termux → via `pip`
+> - **DNS container/HP blokir**: kalau `pkg`/`pip` gagal resolve, hardcode
+>   `/etc/hosts` (butuh root) atau andalkan mirror yang jalan.
+> - **CA palsu harus di-append ke `certifi/cacert.pem`** — engine memakai
+>   certifi, bukan `/etc/tls/`. Patcher melakukannya otomatis (Step 3b).
+
+> Termux Android 12 ARM64 **sudah VIP + tool Smali Patcher jalan** (lihat
+> *Status tested*). Di HP fisik, patcher memilih jalur otomatis (non-root).
 > Detail: [`termux/README.md`](termux/README.md)
 
 ## Troubleshooting
@@ -134,7 +155,9 @@ aio
 | `library "libpython3.14.so" not found` (Linux) | lib dari release belum terpasang di `/system/lib64` (Linux) |
 | `library "libandroid-support.so" not found` | `libandroid-support.so` belum ada di samping libpython |
 | `pkg install` → `apt ... required file not found` | shim apt menimpa paket apt → `cp -f $PREFIX/bin/apt.asli $PREFIX/bin/apt` |
-| `[Job/Claim] Server menolak claim …` | gate lapis-2 (client-side) — lihat `FINDINGS.md` §5 |
+| `ModuleNotFoundError: certifi` / `requests` | `pip install certifi requests` (tidak ada di repo Termux) |
+| `No module named '_cffi_backend'` (PyNaCl) | PyNaCl butuh cffi; fake server kini fallback ke `cryptography` — tak wajib |
+| `[Job/Claim] Server menolak claim …` | jalankan dengan **`AIO_HOOK=1 aio`** (hook claim butuh stdin non-tty) |
 | Loading bar numpuk newline | bar 92 char > lebar layar → `COLUMNS=80` / perkecil font |
 
 ## Struktur
